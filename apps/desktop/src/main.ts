@@ -3,6 +3,7 @@
  * Handles window management, file system operations, and IPC communication
  */
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
+import { rm } from 'fs/promises';
 import { join } from 'path';
 import * as fs from 'fs/promises';
 import { watch, type FSWatcher } from 'chokidar';
@@ -290,6 +291,10 @@ function setupIpcHandlers(): void {
     await fs.unlink(path);
   });
 
+  ipcMain.handle('fs:rm', async (_, path: string) => {
+    await rm(path, { recursive: true, force: true });
+  });
+
   ipcMain.handle('fs:stat', async (_, path: string) => {
     const stats = await fs.stat(path);
     return {
@@ -334,6 +339,36 @@ function setupIpcHandlers(): void {
     );
 
     return assetInfo.relativePath;
+  });
+
+  ipcMain.handle('document:close', async () => {
+    // Cleanup current engine
+    if (currentEngine) {
+      currentEngine.destroy();
+      currentEngine = null;
+    }
+    // Stop file watcher
+    if (fileWatcher) {
+      await fileWatcher.close();
+      fileWatcher = null;
+    }
+  });
+
+  // Shell operations
+  ipcMain.handle('shell:open-path', async (_, path: string) => {
+    return shell.openPath(path);
+  });
+
+  // Dialog operations
+  ipcMain.handle('dialog:show-confirm', async (_, message: string) => {
+    const result = await dialog.showMessageBox(mainWindow!, {
+      type: 'question',
+      buttons: ['取消', '确认'],
+      defaultId: 1,
+      cancelId: 0,
+      message,
+    });
+    return result.response === 1;
   });
 }
 

@@ -23,6 +23,12 @@ interface ElectronAPI {
       size: number;
       mtime: number;
     }>;
+    rm: (path: string) => Promise<void>;
+  };
+
+  // Shell operations
+  shell: {
+    openPath: (path: string) => Promise<string>;
   };
 
   // Document operations
@@ -31,6 +37,12 @@ interface ElectronAPI {
     save: (content: string) => Promise<boolean>;
     getContent: () => Promise<string>;
     uploadImage: (data: number[], fileName: string) => Promise<string>;
+    close: () => Promise<void>;
+  };
+
+  // Dialog operations
+  dialog: {
+    showConfirm: (message: string) => Promise<boolean>;
   };
 
   // Event listeners
@@ -55,6 +67,15 @@ const api: ElectronAPI = {
     rename: (oldPath, newPath) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
     unlink: (path) => ipcRenderer.invoke('fs:unlink', path),
     stat: (path) => ipcRenderer.invoke('fs:stat', path),
+    rm: (path) => ipcRenderer.invoke('fs:rm', path),
+  },
+
+  shell: {
+    openPath: (path) => ipcRenderer.invoke('shell:open-path', path),
+  },
+
+  dialog: {
+    showConfirm: (message) => ipcRenderer.invoke('dialog:show-confirm', message),
   },
 
   document: {
@@ -62,6 +83,7 @@ const api: ElectronAPI = {
     save: (content) => ipcRenderer.invoke('document:save', content),
     getContent: () => ipcRenderer.invoke('document:get-content'),
     uploadImage: (data, fileName) => ipcRenderer.invoke('document:upload-image', data, fileName),
+    close: () => ipcRenderer.invoke('document:close'),
   },
 
   onDocumentLoaded: (callback) => {

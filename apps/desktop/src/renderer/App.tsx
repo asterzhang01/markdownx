@@ -84,6 +84,107 @@ export function App() {
     console.log('Selected folder:', path);
   }, []);
 
+  // Handle rename document
+  const handleRenameDocument = useCallback(async (oldPath: string, newName: string) => {
+    if (!window.electronAPI) return;
+
+    // Extract parent directory and construct new path
+    const parentDir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+    const newPath = `${parentDir}/${newName}`;
+
+    // Check if new name already exists
+    const exists = await window.electronAPI.fs.exists(newPath);
+    if (exists) {
+      alert('A file with this name already exists');
+      return;
+    }
+
+    try {
+      await window.electronAPI.fs.rename(oldPath, newPath);
+      
+      // Update sidebar items
+      setSidebarItems(prev => prev.map(item => 
+        item.path === oldPath 
+          ? { ...item, name: newName, path: newPath }
+          : item
+      ));
+
+      // If renamed document is currently open, update the state
+      if (state.basePath === oldPath) {
+        setState(prev => ({ ...prev, basePath: newPath }));
+      }
+    } catch (error) {
+      console.error('Failed to rename document:', error);
+      alert('Failed to rename document');
+    }
+  }, [state.basePath]);
+
+  // Handle delete document
+  const handleDeleteDocument = useCallback(async (path: string) => {
+    if (!window.electronAPI) return;
+
+    const confirmed = await window.electronAPI.dialog.showConfirm(
+      '确定要删除这个文档吗？此操作无法撤销。'
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      // Check if it's a directory (mdx files are folders)
+      const stat = await window.electronAPI.fs.stat(path);
+      
+      if (stat.isDirectory) {
+        // Use fs:rm for recursive directory deletion
+        await window.electronAPI.fs.rm(path);
+      } else {
+        // Use unlink for single files
+        await window.electronAPI.fs.unlink(path);
+      }
+      
+      // Remove from sidebar - filter out the deleted item and all its children
+      setSidebarItems(prev => {
+        const filtered = prev.filter(item => {
+          // Remove the item itself
+          if (item.path === path) return false;
+          // Remove any children of this item (if it's a folder)
+          if (item.path.startsWith(path + '/')) return false;
+          return true;
+        });
+        return filtered;
+      });
+
+      // If deleted document is currently open, clear the state and notify main process to close it
+      if (state.basePath === path) {
+        // Close the current document in main process
+        await window.electronAPI.document.close?.();
+        
+        // Reset the state to initial (show WelcomePage)
+        setState({
+          content: '',
+          manifest: null,
+          basePath: null,
+          isDirty: false,
+          lastSaved: null,
+        });
+        setIsLoading(false);
+      }
+    } catch (error) {
+      console.error('Failed to delete document:', error);
+      alert('删除文档失败');
+    }
+  }, [state.basePath]);
+
+  // Handle open in Finder
+  const handleOpenInFinder = useCallback(async (path: string) => {
+    if (!window.electronAPI) return;
+
+    try {
+      await window.electronAPI.shell.openPath(path);
+    } catch (error) {
+      console.error('Failed to open in Finder:', error);
+    }
+  }, []);
+
   // Listen for document events from main process
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -149,6 +250,9 @@ export function App() {
         onFolderSelect={handleFolderSelect}
         onNewDocument={handleNewDocument}
         onOpenDocument={handleOpenDocument}
+        onRenameDocument={handleRenameDocument}
+        onDeleteDocument={handleDeleteDocument}
+        onOpenInFinder={handleOpenInFinder}
       />
 
       {/* Right Content Area */}

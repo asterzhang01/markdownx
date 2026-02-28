@@ -10,7 +10,11 @@ import {
   ChevronDownIcon,
   PlusIcon,
   FolderOpenIcon,
+  PencilIcon,
+  TrashIcon,
+  ExternalLinkIcon,
 } from './icons';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 
 export interface FileItem {
   name: string;
@@ -27,6 +31,9 @@ interface SidebarProps {
   onFolderSelect?: (path: string) => void;
   onNewDocument: () => void;
   onOpenDocument: () => void;
+  onRenameDocument?: (path: string, newName: string) => void;
+  onDeleteDocument?: (path: string) => void;
+  onOpenInFinder?: (path: string) => void;
 }
 
 function FileTreeItem({
@@ -35,12 +42,14 @@ function FileTreeItem({
   currentPath,
   onFileSelect,
   onToggle,
+  onContextMenu,
 }: {
   item: FileItem;
   level: number;
   currentPath: string | null;
   onFileSelect: (path: string) => void;
   onToggle: (path: string) => void;
+  onContextMenu?: (e: React.MouseEvent, item: FileItem) => void;
 }) {
   const isSelected = currentPath === item.path;
   const paddingLeft = `${level * 12 + 8}px`;
@@ -53,10 +62,17 @@ function FileTreeItem({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu?.(e, item);
+  };
+
   return (
     <div>
       <button
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         className={`w-full flex items-center gap-1 px-2 py-1.5 text-sm text-left rounded-md transition-colors ${
           isSelected
             ? 'bg-blue-100 text-blue-900'
@@ -108,8 +124,17 @@ export function Sidebar({
   onFileSelect,
   onNewDocument,
   onOpenDocument,
+  onRenameDocument,
+  onDeleteDocument,
+  onOpenInFinder,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    position: { x: number; y: number } | null;
+    item: FileItem | null;
+  }>({ position: null, item: null });
+  const [editingItem, setEditingItem] = useState<FileItem | null>(null);
+  const [editName, setEditName] = useState('');
 
   const handleToggle = useCallback((path: string) => {
     setExpandedFolders((prev) => {
@@ -133,6 +158,80 @@ export function Sidebar({
   };
 
   const displayItems = applyExpandedState(items);
+
+  const handleContextMenu = (e: React.MouseEvent, item: FileItem) => {
+    setContextMenu({
+      position: { x: e.clientX, y: e.clientY },
+      item,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu({ position: null, item: null });
+  };
+
+  const handleStartRename = () => {
+    if (contextMenu.item) {
+      setEditingItem(contextMenu.item);
+      setEditName(contextMenu.item.name);
+      handleCloseContextMenu();
+    }
+  };
+
+  const handleConfirmRename = () => {
+    if (editingItem && editName.trim() && editName.trim() !== editingItem.name) {
+      onRenameDocument?.(editingItem.path, editName.trim());
+    }
+    setEditingItem(null);
+    setEditName('');
+  };
+
+  const handleCancelRename = () => {
+    setEditingItem(null);
+    setEditName('');
+  };
+
+  const handleDelete = () => {
+    if (contextMenu.item) {
+      onDeleteDocument?.(contextMenu.item.path);
+      handleCloseContextMenu();
+    }
+  };
+
+  const handleOpenInFinder = () => {
+    if (contextMenu.item) {
+      onOpenInFinder?.(contextMenu.item.path);
+      handleCloseContextMenu();
+    }
+  };
+
+  const getContextMenuItems = (): ContextMenuItem[] => {
+    if (!contextMenu.item) return [];
+    
+    return [
+      {
+        label: '重命名',
+        icon: <PencilIcon className="w-4 h-4" />,
+        onClick: handleStartRename,
+      },
+      {
+        label: '在 Finder 中打开',
+        icon: <ExternalLinkIcon className="w-4 h-4" />,
+        onClick: handleOpenInFinder,
+      },
+      {
+        label: '',
+        separator: true,
+        onClick: () => {},
+      },
+      {
+        label: '删除',
+        icon: <TrashIcon className="w-4 h-4" />,
+        onClick: handleDelete,
+        danger: true,
+      },
+    ];
+  };
 
   return (
     <div className="w-64 h-full bg-gray-50 border-r border-gray-200 flex flex-col">
@@ -179,17 +278,43 @@ export function Sidebar({
           </div>
         ) : (
           displayItems.map((item) => (
-            <FileTreeItem
-              key={item.path}
-              item={item}
-              level={0}
-              currentPath={currentPath}
-              onFileSelect={onFileSelect}
-              onToggle={handleToggle}
-            />
+            <div key={item.path}>
+              {editingItem?.path === item.path ? (
+                <div className="px-2 py-1">
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmRename();
+                      if (e.key === 'Escape') handleCancelRename();
+                    }}
+                    onBlur={handleConfirmRename}
+                    autoFocus
+                    className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+              ) : (
+                <FileTreeItem
+                  item={item}
+                  level={0}
+                  currentPath={currentPath}
+                  onFileSelect={onFileSelect}
+                  onToggle={handleToggle}
+                  onContextMenu={handleContextMenu}
+                />
+              )}
+            </div>
           ))
         )}
       </div>
+
+      {/* Context Menu */}
+      <ContextMenu
+        items={getContextMenuItems()}
+        position={contextMenu.position}
+        onClose={handleCloseContextMenu}
+      />
 
       {/* Footer info */}
       <div className="px-3 py-2 border-t border-gray-200 text-xs text-gray-400">
