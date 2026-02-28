@@ -1,0 +1,64 @@
+{
+  "name": "@markdownx/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MarkdownX Desktop App",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist out",
+    "package": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "@markdownx/core": "workspace:*",
+    "@markdownx/editor-web": "workspace:*",
+    "chokidar": "^4.0.0",
+    "electron-store": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "com.markdownx.app",
+    "productName": "MarkdownX",
+    "directories": {
+      "output": "out"
+    },
+    "files": [
+      "dist/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
+    }
+  }
+}
