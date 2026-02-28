@@ -34,6 +34,8 @@ export function App() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarItems, setSidebarItems] = useState<FileItem[]>([]);
+  const [openMode, setOpenMode] = useState<'file' | 'folder' | null>(null);
+  const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const editorRef = useRef<EditorHandle>(null);
 
@@ -62,20 +64,45 @@ export function App() {
 
   // Handle new document request
   const handleNewDocument = useCallback(async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.document.new();
+    if (!window.electronAPI) return;
+
+    const newPath = await window.electronAPI.document.new();
+    
+    if (newPath) {
+      if (openMode === 'folder' && watchedFolder) {
+        // In folder mode, new file will trigger watcher to auto-refresh
+        // No need to manually refresh
+      } else {
+        // Single file mode, switch to single file view
+        const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+        setOpenMode('file');
+        setWatchedFolder(null);
+        setSidebarItems([{
+          name: parentDir.split('/').pop() || 'Untitled',
+          path: parentDir,
+          type: 'file',
+        }]);
+      }
     }
-  }, []);
+  }, [openMode, watchedFolder]);
 
   // Handle open document request
-  const handleOpenDocument = useCallback(() => {
-    // Similar to above
+  const handleOpenDocument = useCallback(async () => {
+    if (!window.electronAPI) return;
+
+    // Trigger open dialog in main process
+    await window.electronAPI.document.open();
   }, []);
 
   // Handle file selection from sidebar
-  const handleFileSelect = useCallback((path: string) => {
-    // Load the selected file
-    console.log('Selected file:', path);
+  const handleFileSelect = useCallback(async (path: string) => {
+    if (!window.electronAPI) return;
+
+    // Load the selected mdx document
+    setIsLoading(true);
+    
+    // Request main process to load this document
+    await window.electronAPI.document.load(path);
   }, []);
 
   // Handle folder selection from sidebar
@@ -102,13 +129,10 @@ export function App() {
     try {
       await window.electronAPI.fs.rename(oldPath, newPath);
       
-      // Update sidebar items
-      setSidebarItems(prev => prev.map(item => 
-        item.path === oldPath 
-          ? { ...item, name: newName, path: newPath }
-          : item
-      ));
-
+      // Note: We don't manually update sidebarItems here
+      // In folder mode, the file system watcher will detect the change and auto-update
+      // In single file mode, the sidebar only shows one file anyway
+      
       // If renamed document is currently open, update the state
       if (state.basePath === oldPath) {
         setState(prev => ({ ...prev, basePath: newPath }));
@@ -202,16 +226,6 @@ export function App() {
       
       // Update editor content
       editorRef.current?.setContent(data.content);
-      
-      // Update sidebar with the opened document
-      if (data.basePath) {
-        const docName = data.basePath.split('/').pop() || 'Untitled';
-        setSidebarItems([{
-          name: docName,
-          path: data.basePath,
-          type: 'file',
-        }]);
-      }
     });
 
     // Document saved
@@ -233,10 +247,56 @@ export function App() {
       editorRef.current?.setContent(content);
     });
 
+    // Folder loaded (legacy event, can be removed later)
+    window.electronAPI.onFolderLoaded((data) => {
+      setSidebarItems(data.fileTree);
+      setIsLoading(false);
+    });
+
+    // Single file opened mode
+    window.electronAPI.onFileOpened((data) => {
+      setOpenMode('file');
+      setWatchedFolder(null);
+      setSidebarItems([{
+        name: data.name,
+        path: data.path,
+        type: 'file',
+      }]);
+      setIsLoading(false);
+    });
+
+    // Folder opened mode
+    window.electronAPI.onFolderOpened((data) => {
+      setOpenMode('folder');
+      setWatchedFolder(data.folderPath);
+      setSidebarItems(data.files);
+      setIsLoading(false);
+    });
+
+    // Folder changed (file added/removed)
+    window.electronAPI.onFolderChanged((change) => {
+      if (change.type === 'add' && change.item) {
+        setSidebarItems(prev => {
+          // Check if item already exists (avoid duplicates)
+          const exists = prev.some(item => item.path === change.item!.path);
+          if (exists) {
+            return prev;
+          }
+          return [...prev, change.item!];
+        });
+      } else if (change.type === 'remove' && change.path) {
+        setSidebarItems(prev => prev.filter(item => item.path !== change.path));
+      }
+    });
+
     return () => {
       window.electronAPI.removeAllListeners('document:loaded');
       window.electronAPI.removeAllListeners('document:saved');
       window.electronAPI.removeAllListeners('document:external-change');
+      window.electronAPI.removeAllListeners('folder:loaded');
+      window.electronAPI.removeAllListeners('file:opened');
+      window.electronAPI.removeAllListeners('folder:opened');
+      window.electronAPI.removeAllListeners('folder:changed');
     };
   }, []);
 

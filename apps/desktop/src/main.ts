@@ -4,7 +4,7 @@
  */
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import { rm } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
 import * as fs from 'fs/promises';
 import { watch, type FSWatcher } from 'chokidar';
 import {
@@ -16,10 +16,19 @@ import {
   type SyncEngine,
 } from '@markdownx/core';
 
+// File tree item type for sidebar
+interface FileItem {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+  children?: FileItem[];
+}
+
 // State
 let mainWindow: BrowserWindow | null = null;
 let currentEngine: SyncEngine | null = null;
 let fileWatcher: FSWatcher | null = null;
+let folderWatcher: FSWatcher | null = null;
 const fsAdapter = createNodeFsAdapter();
 
 /**
@@ -143,8 +152,9 @@ function setupMenu(): void {
 
 /**
  * Handle creating a new document
+ * @returns The path of the newly created document, or null if canceled
  */
-async function handleNewDocument(): Promise<void> {
+async function handleNewDocument(): Promise<string | null> {
   const { filePath } = await dialog.showSaveDialog(mainWindow!, {
     title: 'Create New Document',
     defaultPath: 'Untitled.mdx',
@@ -153,22 +163,216 @@ async function handleNewDocument(): Promise<void> {
   });
 
   if (filePath) {
+    // Stop folder watcher when creating new file (switch to file mode)
+    if (folderWatcher) {
+      await folderWatcher.close();
+      folderWatcher = null;
+    }
+    
     await loadDocument(filePath, true);
+    
+    // Send file:opened event to update sidebar
+    mainWindow?.webContents.send('file:opened', {
+      path: filePath,
+      name: basename(filePath),
+    });
+    
+    return filePath;
   }
+  return null;
 }
 
 /**
- * Handle opening an existing document
+ * Recursively scan folder for mdx documents
+ */
+async function scanFolderForMdx(folderPath: string): Promise<FileItem[]> {
+  async function scanRecursive(currentPath: string): Promise<FileItem[]> {
+    const result: FileItem[] = [];
+    
+    try {
+      const entries = await fs.readdir(currentPath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = join(currentPath, entry.name);
+        
+        if (entry.isDirectory()) {
+          // Check if it's an mdx document folder (contains index.md and .mdx/state.bin)
+          const isMdxDoc = await isMarkdownXDocument(fullPath, fsAdapter);
+          if (isMdxDoc) {
+            result.push({
+              name: entry.name,
+              path: fullPath,
+              type: 'file',
+            });
+          } else {
+            // Regular folder, recursively scan
+            const children = await scanRecursive(fullPath);
+            if (children.length > 0) {
+              result.push({
+                name: entry.name,
+                path: fullPath,
+                type: 'folder',
+                children,
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Skip folders we can't read (permission issues, etc.)
+      console.warn(`Cannot read folder: ${currentPath}`, error);
+    }
+    
+    return result;
+  }
+  
+  return scanRecursive(folderPath);
+}
+
+/**
+ * Load folder and send file tree to renderer
+ */
+async function loadFolder(folderPath: string): Promise<void> {
+  const fileTree = await scanFolderForMdx(folderPath);
+  
+  // Send file tree to renderer
+  mainWindow?.webContents.send('folder:loaded', {
+    fileTree,
+    folderPath,
+  });
+}
+
+/**
+ * Scan current directory for mdx documents (non-recursive)
+ */
+async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
+  const result: FileItem[] = [];
+  
+  try {
+    const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = join(folderPath, entry.name);
+      
+      if (entry.isDirectory()) {
+        // Only check if it's an mdx document, don't recurse into subdirectories
+        const isMdxDoc = await isMarkdownXDocument(fullPath, fsAdapter);
+        if (isMdxDoc) {
+          result.push({
+            name: entry.name,
+            path: fullPath,
+            type: 'file',
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`Cannot read folder: ${folderPath}`, error);
+  }
+  
+  return result;
+}
+
+/**
+ * Setup folder watcher for automatic refresh
+ */
+async function setupFolderWatcher(folderPath: string): Promise<void> {
+  // Clear previous watcher
+  if (folderWatcher) {
+    await folderWatcher.close();
+    folderWatcher = null;
+  }
+  
+  // Use chokidar to watch directory changes
+  folderWatcher = watch(folderPath, {
+    ignoreInitial: true,
+    depth: 0, // Only watch current directory, don't recurse
+  });
+  
+  folderWatcher.on('addDir', async (path) => {
+    // New folder added, check if it's an mdx document
+    const isMdxDoc = await isMarkdownXDocument(path, fsAdapter);
+    if (isMdxDoc) {
+      mainWindow?.webContents.send('folder:changed', {
+        type: 'add',
+        item: {
+          name: basename(path),
+          path,
+          type: 'file',
+        },
+      });
+    }
+  });
+  
+  folderWatcher.on('unlinkDir', (path) => {
+    // Folder removed
+    mainWindow?.webContents.send('folder:changed', {
+      type: 'remove',
+      path,
+    });
+  });
+}
+
+/**
+ * Open folder mode - scan and watch directory
+ */
+async function openFolder(folderPath: string): Promise<void> {
+  // Scan current directory for mdx files (non-recursive)
+  const files = await scanCurrentDir(folderPath);
+  
+  // Send file list to renderer
+  mainWindow?.webContents.send('folder:opened', {
+    files,
+    folderPath,
+  });
+  
+  // Setup file system watcher
+  await setupFolderWatcher(folderPath);
+}
+
+/**
+ * Handle opening an existing document or folder
  */
 async function handleOpenDocument(): Promise<void> {
-  const { filePaths } = await dialog.showOpenDialog(mainWindow!, {
-    title: 'Open Document',
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Open Document or Folder',
     filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
-    properties: ['openDirectory'],
+    properties: ['openFile', 'openDirectory'],
   });
 
-  if (filePaths.length > 0) {
-    await loadDocument(filePaths[0]);
+  if (!result.canceled && result.filePaths.length > 0) {
+    const selectedPath = result.filePaths[0];
+    const stats = await fs.stat(selectedPath);
+    
+    if (stats.isFile()) {
+      // Mode A: Open single file
+      // Stop folder watcher when switching to file mode
+      if (folderWatcher) {
+        await folderWatcher.close();
+        folderWatcher = null;
+      }
+      
+      const parentDir = dirname(selectedPath);
+      await loadDocument(parentDir);
+      // Send single file info to renderer, don't scan entire directory
+      mainWindow?.webContents.send('file:opened', {
+        path: parentDir,
+        name: basename(parentDir),
+      });
+    } else {
+      // Mode B: Open folder
+      // Clean up current document when switching to folder mode
+      if (currentEngine) {
+        currentEngine.destroy();
+        currentEngine = null;
+      }
+      if (fileWatcher) {
+        await fileWatcher.close();
+        fileWatcher = null;
+      }
+      
+      await openFolder(selectedPath);
+    }
   }
 }
 
@@ -307,7 +511,17 @@ function setupIpcHandlers(): void {
 
   // Document operations
   ipcMain.handle('document:new', async () => {
-    await handleNewDocument();
+    const newPath = await handleNewDocument();
+    return newPath;
+  });
+
+  ipcMain.handle('document:open', async () => {
+    await handleOpenDocument();
+    return true;
+  });
+
+  ipcMain.handle('document:load', async (_, filePath: string) => {
+    await loadDocument(filePath);
     return true;
   });
 
@@ -370,6 +584,11 @@ function setupIpcHandlers(): void {
     });
     return result.response === 1;
   });
+
+  // Folder operations
+  ipcMain.handle('folder:scan', async (_, folderPath: string) => {
+    return scanFolderForMdx(folderPath);
+  });
 }
 
 // App lifecycle
@@ -397,5 +616,8 @@ app.on('before-quit', () => {
   }
   if (fileWatcher) {
     fileWatcher.close();
+  }
+  if (folderWatcher) {
+    folderWatcher.close();
   }
 });

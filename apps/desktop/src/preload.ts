@@ -4,6 +4,14 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 
+// File tree item type
+interface FileItem {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+  children?: FileItem[];
+}
+
 // Types for exposed APIs
 interface ElectronAPI {
   // File system operations
@@ -26,6 +34,11 @@ interface ElectronAPI {
     rm: (path: string) => Promise<void>;
   };
 
+  // Folder operations
+  folder: {
+    scan: (path: string) => Promise<FileItem[]>;
+  };
+
   // Shell operations
   shell: {
     openPath: (path: string) => Promise<string>;
@@ -33,7 +46,9 @@ interface ElectronAPI {
 
   // Document operations
   document: {
-    new: () => Promise<boolean>;
+    new: () => Promise<string | null>;
+    open: () => Promise<boolean>;
+    load: (path: string) => Promise<boolean>;
     save: (content: string) => Promise<boolean>;
     getContent: () => Promise<string>;
     uploadImage: (data: number[], fileName: string) => Promise<string>;
@@ -49,6 +64,10 @@ interface ElectronAPI {
   onDocumentLoaded: (callback: (data: { content: string; manifest: unknown; basePath: string }) => void) => void;
   onDocumentSaved: (callback: () => void) => void;
   onExternalChange: (callback: (content: string) => void) => void;
+  onFolderLoaded: (callback: (data: { fileTree: FileItem[]; folderPath: string }) => void) => void;
+  onFileOpened: (callback: (data: { path: string; name: string }) => void) => void;
+  onFolderOpened: (callback: (data: { files: FileItem[]; folderPath: string }) => void) => void;
+  onFolderChanged: (callback: (change: { type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => void;
 
   // Remove listeners
   removeAllListeners: (channel: string) => void;
@@ -80,10 +99,16 @@ const api: ElectronAPI = {
 
   document: {
     new: () => ipcRenderer.invoke('document:new'),
+    open: () => ipcRenderer.invoke('document:open'),
+    load: (path) => ipcRenderer.invoke('document:load', path),
     save: (content) => ipcRenderer.invoke('document:save', content),
     getContent: () => ipcRenderer.invoke('document:get-content'),
     uploadImage: (data, fileName) => ipcRenderer.invoke('document:upload-image', data, fileName),
     close: () => ipcRenderer.invoke('document:close'),
+  },
+
+  folder: {
+    scan: (path) => ipcRenderer.invoke('folder:scan', path),
   },
 
   onDocumentLoaded: (callback) => {
@@ -96,6 +121,22 @@ const api: ElectronAPI = {
 
   onExternalChange: (callback) => {
     ipcRenderer.on('document:external-change', (_, content) => callback(content));
+  },
+
+  onFolderLoaded: (callback) => {
+    ipcRenderer.on('folder:loaded', (_, data) => callback(data));
+  },
+
+  onFileOpened: (callback) => {
+    ipcRenderer.on('file:opened', (_, data) => callback(data));
+  },
+
+  onFolderOpened: (callback) => {
+    ipcRenderer.on('folder:opened', (_, data) => callback(data));
+  },
+
+  onFolderChanged: (callback) => {
+    ipcRenderer.on('folder:changed', (_, data) => callback(data));
   },
 
   removeAllListeners: (channel) => {
