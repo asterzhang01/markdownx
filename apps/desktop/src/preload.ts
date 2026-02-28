@@ -27,6 +27,7 @@ interface ElectronAPI {
 
   // Document operations
   document: {
+    new: () => Promise<boolean>;
     save: (content: string) => Promise<boolean>;
     getContent: () => Promise<string>;
     uploadImage: (data: number[], fileName: string) => Promise<string>;
@@ -57,6 +58,7 @@ const api: ElectronAPI = {
   },
 
   document: {
+    new: () => ipcRenderer.invoke('document:new'),
     save: (content) => ipcRenderer.invoke('document:save', content),
     getContent: () => ipcRenderer.invoke('document:get-content'),
     uploadImage: (data, fileName) => ipcRenderer.invoke('document:upload-image', data, fileName),

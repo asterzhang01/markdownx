@@ -146,8 +146,8 @@ function setupMenu(): void {
 async function handleNewDocument(): Promise<void> {
   const { filePath } = await dialog.showSaveDialog(mainWindow!, {
     title: 'Create New Document',
-    defaultPath: 'Untitled.markdownx',
-    filters: [{ name: 'MarkdownX', extensions: ['markdownx'] }],
+    defaultPath: 'Untitled.mdx',
+    filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
     properties: ['createDirectory'],
   });
 
@@ -162,7 +162,7 @@ async function handleNewDocument(): Promise<void> {
 async function handleOpenDocument(): Promise<void> {
   const { filePaths } = await dialog.showOpenDialog(mainWindow!, {
     title: 'Open Document',
-    filters: [{ name: 'MarkdownX', extensions: ['markdownx'] }],
+    filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
     properties: ['openDirectory'],
   });
 
@@ -301,6 +301,11 @@ function setupIpcHandlers(): void {
   });
 
   // Document operations
+  ipcMain.handle('document:new', async () => {
+    await handleNewDocument();
+    return true;
+  });
+
   ipcMain.handle('document:save', async (_, content: string) => {
     if (currentEngine) {
       await currentEngine.applyChange(content);

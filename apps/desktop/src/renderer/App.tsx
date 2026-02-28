@@ -33,7 +33,7 @@ export function App() {
     lastSaved: null,
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [sidebarItems] = useState<FileItem[]>([]);
+  const [sidebarItems, setSidebarItems] = useState<FileItem[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const editorRef = useRef<EditorHandle>(null);
 
@@ -61,12 +61,9 @@ export function App() {
   }, []);
 
   // Handle new document request
-  const handleNewDocument = useCallback(() => {
-    // Trigger main process dialog via keyboard shortcut simulation
-    // or expose a new IPC method
+  const handleNewDocument = useCallback(async () => {
     if (window.electronAPI) {
-      // For now, we'll use the menu shortcut
-      // In production, add: window.electronAPI.document.new()
+      await window.electronAPI.document.new();
     }
   }, []);
 
@@ -104,6 +101,16 @@ export function App() {
       
       // Update editor content
       editorRef.current?.setContent(data.content);
+      
+      // Update sidebar with the opened document
+      if (data.basePath) {
+        const docName = data.basePath.split('/').pop() || 'Untitled';
+        setSidebarItems([{
+          name: docName,
+          path: data.basePath,
+          type: 'file',
+        }]);
+      }
     });
 
     // Document saved
