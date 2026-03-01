@@ -248,6 +248,12 @@ export function Sidebar({
   // Context menu handlers
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, node: NodeApi<TreeNode> | null) => {
+      console.log('[Sidebar] handleContextMenu called:', { mode, itemsLength: items.length, node: node?.data.id });
+      // In single file mode, if the file is deleted (items is empty), disable context menu
+      if (mode === 'file' && items.length === 0) {
+        console.log('[Sidebar] Blocking context menu: single file mode with empty items');
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       setContextMenu({
@@ -255,16 +261,22 @@ export function Sidebar({
         node,
       });
     },
-    []
+    [mode, items.length]
   );
 
   const handleEmptyAreaContextMenu = useCallback((e: React.MouseEvent) => {
+    console.log('[Sidebar] handleEmptyAreaContextMenu called:', { mode, itemsLength: items.length });
+    // If no items in sidebar (file deleted or not opened), disable context menu
+    if (items.length === 0) {
+      console.log('[Sidebar] Blocking empty area context menu: no items in sidebar');
+      return;
+    }
     e.preventDefault();
     setContextMenu({
       position: { x: e.clientX, y: e.clientY },
       node: null,
     });
-  }, []);
+  }, [mode, items.length]);
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu({ position: null, node: null });
@@ -371,9 +383,15 @@ export function Sidebar({
 
   // Build context menu items
   const getContextMenuItems = useCallback((): ContextMenuItem[] => {
+    console.log('[Sidebar] getContextMenuItems called:', { mode, itemsLength: items.length, hasNode: !!contextMenu.node });
+    // If no items in sidebar, show no menu
+    if (items.length === 0) {
+      console.log('[Sidebar] Returning empty menu: no items in sidebar');
+      return [];
+    }
     // Empty area context menu (root directory)
     if (!contextMenu.node) {
-      // In single file mode, only show "Open in Finder" option
+      // In single file mode with file present, only show "Open in Finder" option
       if (mode === 'file') {
         if (onOpenInFinder && currentPath) {
           return [
@@ -482,6 +500,7 @@ export function Sidebar({
     contextMenu.node,
     mode,
     currentPath,
+    items.length,
     handleNewDocumentInRoot,
     handleNewFolderInRoot,
     handleNewDocumentInFolder,

@@ -66,7 +66,11 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     return { x: adjustedX, y: adjustedY };
   };
 
-  if (!position) return null;
+  console.log('[ContextMenu] Rendering check:', { hasPosition: !!position, itemsCount: items.length });
+  if (!position || items.length === 0) {
+    console.log('[ContextMenu] Not rendering: position or items empty');
+    return null;
+  }
 
   const adjustedPosition = adjustPosition(position.x, position.y);
 
