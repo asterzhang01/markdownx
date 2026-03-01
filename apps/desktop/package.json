@@ -35,7 +35,7 @@
     "vite": "^6.0.0"
   },
   "build": {
-    "appId": "com.markdownx.app",
+    "appId": "com.mdx.app",
     "productName": "MarkdownX",
     "directories": {
       "output": "out"

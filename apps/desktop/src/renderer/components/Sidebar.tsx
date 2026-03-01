@@ -8,7 +8,6 @@ import {
   DocumentIcon,
   ChevronRightIcon,
   ChevronDownIcon,
-  PlusIcon,
   FolderOpenIcon,
   PencilIcon,
   TrashIcon,
@@ -46,6 +45,11 @@ function FileTreeItem({
   onFileSelect,
   onToggle,
   onContextMenu,
+  editingItem,
+  editName,
+  setEditName,
+  onConfirmRename,
+  onCancelRename,
 }: {
   item: FileItem;
   level: number;
@@ -55,10 +59,21 @@ function FileTreeItem({
   onFileSelect: (path: string) => void;
   onToggle: (path: string) => void;
   onContextMenu?: (e: React.MouseEvent, item: FileItem) => void;
+  editingItem?: FileItem | null;
+  editName?: string;
+  setEditName?: (name: string) => void;
+  onConfirmRename?: () => void;
+  onCancelRename?: () => void;
 }) {
+  const isEditing = editingItem?.path === item.path;
   const isSelected = currentPath === item.path;
   const paddingLeft = `${level * 12 + 8}px`;
   const hasChildrenLoaded = item.children !== undefined;
+
+  // Remove .mdx extension from display name
+  const displayName = item.name.endsWith('.mdx')
+    ? item.name.slice(0, -4)
+    : item.name;
 
   const handleClick = () => {
     if (item.type === 'folder') {
@@ -73,6 +88,48 @@ function FileTreeItem({
     e.stopPropagation();
     onContextMenu?.(e, item);
   };
+
+  // Render rename input when editing
+  if (isEditing) {
+    return (
+      <div className="px-2 py-1" style={{ paddingLeft }}>
+        <input
+          type="text"
+          value={editName || ''}
+          onChange={(e) => setEditName?.(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onConfirmRename?.();
+            if (e.key === 'Escape') onCancelRename?.();
+          }}
+          onBlur={onConfirmRename}
+          autoFocus
+          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
+        {item.type === 'folder' && isExpanded && hasChildrenLoaded && item.children && (
+          <div>
+            {item.children.map((child) => (
+              <FileTreeItem
+                key={child.path}
+                item={child}
+                level={level + 1}
+                currentPath={currentPath}
+                isExpanded={false}
+                isLoading={false}
+                onFileSelect={onFileSelect}
+                onToggle={onToggle}
+                onContextMenu={onContextMenu}
+                editingItem={editingItem}
+                editName={editName}
+                setEditName={setEditName}
+                onConfirmRename={onConfirmRename}
+                onCancelRename={onCancelRename}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -109,7 +166,7 @@ function FileTreeItem({
         ) : (
           <DocumentIcon className="w-4 h-4 flex-shrink-0 text-blue-500" />
         )}
-        <span className="truncate">{item.name}</span>
+        <span className="truncate">{displayName}</span>
       </button>
       {item.type === 'folder' && isExpanded && hasChildrenLoaded && item.children && (
         <div>
@@ -119,11 +176,16 @@ function FileTreeItem({
               item={child}
               level={level + 1}
               currentPath={currentPath}
-              isExpanded={false} // Will be controlled by parent
-              isLoading={false}  // Will be controlled by parent
+              isExpanded={false}
+              isLoading={false}
               onFileSelect={onFileSelect}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
+              editingItem={editingItem}
+              editName={editName}
+              setEditName={setEditName}
+              onConfirmRename={onConfirmRename}
+              onCancelRename={onCancelRename}
             />
           ))}
         </div>
@@ -166,14 +228,25 @@ export function Sidebar({
   const handleStartRename = () => {
     if (contextMenu.item) {
       setEditingItem(contextMenu.item);
-      setEditName(contextMenu.item.name);
+      // Remove .mdx extension from display name when starting rename
+      const nameForEdit = contextMenu.item.name.endsWith('.mdx')
+        ? contextMenu.item.name.slice(0, -4)
+        : contextMenu.item.name;
+      setEditName(nameForEdit);
       handleCloseContextMenu();
     }
   };
 
   const handleConfirmRename = () => {
-    if (editingItem && editName.trim() && editName.trim() !== editingItem.name) {
-      onRenameDocument?.(editingItem.path, editName.trim());
+    if (editingItem && editName.trim()) {
+      // Get the original name without .mdx extension for comparison
+      const originalName = editingItem.name.endsWith('.mdx')
+        ? editingItem.name.slice(0, -4)
+        : editingItem.name;
+      
+      if (editName.trim() !== originalName) {
+        onRenameDocument?.(editingItem.path, editName.trim());
+      }
     }
     setEditingItem(null);
     setEditName('');
@@ -238,26 +311,6 @@ export function Sidebar({
         </h2>
       </div>
 
-      {/* Action buttons */}
-      <div className="px-3 py-2 flex gap-2">
-        <button
-          onClick={onNewDocument}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          title="New Document (Cmd+N)"
-        >
-          <PlusIcon className="w-4 h-4" />
-          <span>New</span>
-        </button>
-        <button
-          onClick={onOpenDocument}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-white text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-          title="Open Document (Cmd+O)"
-        >
-          <FolderOpenIcon className="w-4 h-4" />
-          <span>Open</span>
-        </button>
-      </div>
-
       {/* File tree */}
       <div className="flex-1 overflow-y-auto py-2">
         {items.length === 0 ? (
@@ -297,6 +350,11 @@ export function Sidebar({
                   onFileSelect={onFileSelect}
                   onToggle={onFolderToggle}
                   onContextMenu={handleContextMenu}
+                  editingItem={editingItem}
+                  editName={editName}
+                  setEditName={setEditName}
+                  onConfirmRename={handleConfirmRename}
+                  onCancelRename={handleCancelRename}
                 />
               )}
             </div>

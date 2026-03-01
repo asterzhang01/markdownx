@@ -102,14 +102,14 @@ export function createExpoFsAdapter(): FileSystemAdapter {
 }
 
 /**
- * Get the documents directory for storing .markdownx files
+ * Get the documents directory for storing .mdx files
  */
 export function getDocumentsDirectory(): string {
   return FileSystem.documentDirectory || '';
 }
 
 /**
- * List all .markdownx documents in the documents directory
+ * List all .mdx documents in the documents directory
  */
 export async function listDocuments(): Promise<string[]> {
   const docsDir = getDocumentsDirectory();
@@ -117,7 +117,7 @@ export async function listDocuments(): Promise<string[]> {
 
   try {
     const contents = await FileSystem.readDirectoryAsync(docsDir);
-    return contents.filter(name => name.endsWith('.markdownx'));
+    return contents.filter(name => name.endsWith('.mdx'));
   } catch {
     return [];
   }

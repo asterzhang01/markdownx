@@ -186,7 +186,18 @@ export function App() {
 
     // Extract parent directory and construct new path
     const parentDir = oldPath.substring(0, oldPath.lastIndexOf('/'));
-    const newPath = `${parentDir}/${newName}`;
+    
+    // Get the original file type (mdx file or regular folder)
+    // If original had .mdx extension, add it to the new name
+    const oldName = oldPath.split('/').pop() || '';
+    const hasMdxExtension = oldName.endsWith('.mdx');
+    
+    // Add .mdx extension if the original was an mdx file
+    const finalName = hasMdxExtension && !newName.endsWith('.mdx')
+      ? `${newName}.mdx`
+      : newName;
+    
+    const newPath = `${parentDir}/${finalName}`;
 
     // Check if new name already exists
     const exists = await window.electronAPI.fs.exists(newPath);
@@ -198,9 +209,17 @@ export function App() {
     try {
       await window.electronAPI.fs.rename(oldPath, newPath);
       
-      // Note: We don't manually update sidebarItems here
-      // In folder mode, the file system watcher will detect the change and auto-update
-      // In single file mode, the sidebar only shows one file anyway
+      // Update sidebar items manually since there's no watcher in file mode
+      setSidebarItems(prev => prev.map(item => {
+        if (item.path === oldPath) {
+          return {
+            ...item,
+            name: finalName,
+            path: newPath,
+          };
+        }
+        return item;
+      }));
       
       // If renamed document is currently open, update the state
       if (state.basePath === oldPath) {
@@ -395,22 +414,27 @@ export function App() {
     };
   }, []);
 
+  // Determine if sidebar should be shown (only when a document/folder is open)
+  const showSidebar = state.basePath !== null || sidebarItems.length > 0;
+
   return (
     <div className="flex h-screen bg-white">
-      {/* Left Sidebar */}
-      <Sidebar
-        items={sidebarItems}
-        currentPath={state.basePath}
-        expandedFolders={expandedFolders}
-        loadingFolders={loadingFolders}
-        onFileSelect={handleFileSelect}
-        onFolderToggle={handleFolderToggle}
-        onNewDocument={handleNewDocument}
-        onOpenDocument={handleOpenDocument}
-        onRenameDocument={handleRenameDocument}
-        onDeleteDocument={handleDeleteDocument}
-        onOpenInFinder={handleOpenInFinder}
-      />
+      {/* Left Sidebar - only show when document/folder is open */}
+      {showSidebar && (
+        <Sidebar
+          items={sidebarItems}
+          currentPath={state.basePath}
+          expandedFolders={expandedFolders}
+          loadingFolders={loadingFolders}
+          onFileSelect={handleFileSelect}
+          onFolderToggle={handleFolderToggle}
+          onNewDocument={handleNewDocument}
+          onOpenDocument={handleOpenDocument}
+          onRenameDocument={handleRenameDocument}
+          onDeleteDocument={handleDeleteDocument}
+          onOpenInFinder={handleOpenInFinder}
+        />
+      )}
 
       {/* Right Content Area */}
       {!state.basePath && !isLoading ? (

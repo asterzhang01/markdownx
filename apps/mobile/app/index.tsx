@@ -53,7 +53,7 @@ export default function HomeScreen() {
         try {
           const info = await FileSystem.getInfoAsync(path);
           docs.push({
-            name: name.replace('.markdownx', ''),
+            name: name.replace('.mdx', ''),
             path,
             modifiedTime: info.modificationTime ?? Date.now(),
           });
@@ -78,9 +78,9 @@ export default function HomeScreen() {
       return;
     }
 
-    const docName = newDocName.trim().endsWith('.markdownx')
+    const docName = newDocName.trim().endsWith('.mdx')
       ? newDocName.trim()
-      : `${newDocName.trim()}.markdownx`;
+      : `${newDocName.trim()}.mdx`;
     const path = getDocumentPath(docName);
 
     // Check if already exists
@@ -130,7 +130,7 @@ export default function HomeScreen() {
   const renderItem = ({ item }: { item: DocumentItem }) => (
     <TouchableOpacity
       style={styles.documentItem}
-      onPress={() => router.push(`/editor/${encodeURIComponent(item.name + '.markdownx')}`)}
+      onPress={() => router.push(`/editor/${encodeURIComponent(item.name + '.mdx')}`)}
       onLongPress={() => handleDeleteDocument(item)}
     >
       <View style={styles.documentIcon}>

@@ -37,7 +37,7 @@ body {
 }
 
 /* Editor overrides */
-.markdownx-editor {
+.mdx-editor {
   @apply h-full;
 }
 

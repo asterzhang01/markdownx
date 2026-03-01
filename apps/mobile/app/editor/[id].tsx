@@ -168,7 +168,7 @@ export default function EditorScreen() {
 
         // Update title
         navigation.setOptions({
-          title: docName.replace('.markdownx', ''),
+          title: docName.replace('.mdx', ''),
         });
       } catch (error) {
         console.error('Failed to load document:', error);

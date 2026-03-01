@@ -5,7 +5,7 @@
 
 /**
  * Manifest for version control and feature detection
- * Stored in .markdownx/manifest.json
+ * Stored in .mdx/manifest.json
  */
 export interface Manifest {
   /** Format version of the document structure */
@@ -133,7 +133,7 @@ export type BridgeMessage =
  * Configuration for sync engine
  */
 export interface SyncEngineConfig {
-  /** Base path of the .markdownx folder */
+  /** Base path of the .mdx folder */
   basePath: string;
   /** FileSystem adapter instance */
   fsAdapter: FileSystemAdapter;

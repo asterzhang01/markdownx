@@ -8,13 +8,13 @@ import type { DocState, FileSystemAdapter, Manifest, SyncEngineConfig, LoadDocRe
 import { initDoc, loadDoc, saveDoc, updateContent, getContent, mergeDocs } from './automerge';
 import { createDefaultManifest, parseManifest, serializeManifest, validateManifest, upgradeManifest } from './manifest';
 
-/** Path constants within a .markdownx folder */
+/** Path constants within a .mdx folder */
 const PATHS = {
   INDEX_MD: 'index.md',
-  STATE_BIN: '.markdownx/state.bin',
-  MANIFEST_JSON: '.markdownx/manifest.json',
-  CONFIG_JSON: '.markdownx/config.json',
-  SYSTEM_DIR: '.markdownx',
+  STATE_BIN: '.mdx/state.bin',
+  MANIFEST_JSON: '.mdx/manifest.json',
+  CONFIG_JSON: '.mdx/config.json',
+  SYSTEM_DIR: '.mdx',
   ASSETS_DIR: 'assets',
 } as const;
 
@@ -328,7 +328,7 @@ export function createSyncEngine(config: SyncEngineConfig): SyncEngine {
 }
 
 /**
- * Helper to check if a path is a valid .markdownx document
+ * Helper to check if a path is a valid .mdx document
  */
 export async function isMarkdownXDocument(
   path: string,
@@ -342,7 +342,7 @@ export async function isMarkdownXDocument(
 }
 
 /**
- * Create a new .markdownx document at the specified path
+ * Create a new .mdx document at the specified path
  */
 export async function createMarkdownXDocument(
   path: string,
