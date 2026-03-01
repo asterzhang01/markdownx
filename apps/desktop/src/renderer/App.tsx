@@ -21,7 +21,7 @@ interface FileItem {
   name: string;
   path: string;
   type: 'file' | 'folder';
-  children?: FileItem[];
+  children?: FileItem[] | undefined; // undefined = not loaded yet (lazy loading)
 }
 
 export function App() {
@@ -36,6 +36,8 @@ export function App() {
   const [sidebarItems, setSidebarItems] = useState<FileItem[]>([]);
   const [openMode, setOpenMode] = useState<'file' | 'folder' | null>(null);
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const editorRef = useRef<EditorHandle>(null);
 
@@ -67,19 +69,19 @@ export function App() {
     if (!window.electronAPI) return;
 
     const newPath = await window.electronAPI.document.new();
-    
+
     if (newPath) {
       if (openMode === 'folder' && watchedFolder) {
         // In folder mode, new file will trigger watcher to auto-refresh
         // No need to manually refresh
       } else {
         // Single file mode, switch to single file view
-        const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+        // newPath is the .mdx folder path, display it directly
         setOpenMode('file');
         setWatchedFolder(null);
         setSidebarItems([{
-          name: parentDir.split('/').pop() || 'Untitled',
-          path: parentDir,
+          name: newPath.split('/').pop() || 'Untitled',
+          path: newPath,
           type: 'file',
         }]);
       }
@@ -105,11 +107,78 @@ export function App() {
     await window.electronAPI.document.load(path);
   }, []);
 
-  // Handle folder selection from sidebar
-  const handleFolderSelect = useCallback((path: string) => {
-    // Expand/collapse folder or load folder contents
-    console.log('Selected folder:', path);
-  }, []);
+  // Handle folder toggle (expand/collapse) with lazy loading
+  // Helper function: find item by path recursively
+  const findItemByPath = (items: FileItem[], path: string): FileItem | null => {
+    for (const item of items) {
+      if (item.path === path) return item;
+      if (item.children) {
+        const found = findItemByPath(item.children, path);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Helper function: update children for a specific path
+  const updateItemChildren = (
+    items: FileItem[],
+    path: string,
+    children: FileItem[]
+  ): FileItem[] => {
+    return items.map(item => {
+      if (item.path === path) {
+        return { ...item, children };
+      }
+      if (item.children) {
+        return { ...item, children: updateItemChildren(item.children, path, children) };
+      }
+      return item;
+    });
+  };
+
+  // Helper function: sort file items (folders first, then alphabetically)
+  const sortFileItems = (a: FileItem, b: FileItem): number => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === 'folder' ? -1 : 1;
+  };
+
+  const handleFolderToggle = useCallback(async (path: string) => {
+    const isExpanded = expandedFolders.has(path);
+    
+    if (isExpanded) {
+      // Collapse: remove from expanded set
+      setExpandedFolders(prev => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } else {
+      // Expand: check if we need to load children
+      const folderItem = findItemByPath(sidebarItems, path);
+      
+      if (folderItem && folderItem.children === undefined && window.electronAPI) {
+        // Need to load children asynchronously
+        setLoadingFolders(prev => new Set(prev).add(path));
+        
+        try {
+          const children = await window.electronAPI.folder.loadChildren(path);
+          // Update sidebarItems with loaded children
+          setSidebarItems(prev => updateItemChildren(prev, path, children));
+        } catch (error) {
+          console.error('Failed to load folder children:', error);
+        } finally {
+          setLoadingFolders(prev => {
+            const next = new Set(prev);
+            next.delete(path);
+            return next;
+          });
+        }
+      }
+      
+      setExpandedFolders(prev => new Set(prev).add(path));
+    }
+  }, [sidebarItems, expandedFolders]);
 
   // Handle rename document
   const handleRenameDocument = useCallback(async (oldPath: string, newName: string) => {
@@ -289,6 +358,31 @@ export function App() {
       }
     });
 
+    // Folder children changed (from file system watcher)
+    const unsubscribeFolderChildrenChanged = window.electronAPI.onFolderChildrenChanged((change) => {
+      setSidebarItems(prev => {
+        const parentItem = findItemByPath(prev, change.parentPath);
+        if (!parentItem) return prev;
+        
+        // If parent has no children loaded yet, ignore the change
+        if (parentItem.children === undefined) return prev;
+        
+        let newChildren = [...parentItem.children];
+        
+        if (change.type === 'add' && change.item) {
+          // Avoid duplicates
+          if (!newChildren.some(c => c.path === change.item!.path)) {
+            newChildren.push(change.item);
+            newChildren.sort(sortFileItems);
+          }
+        } else if (change.type === 'remove' && change.path) {
+          newChildren = newChildren.filter(c => c.path !== change.path);
+        }
+        
+        return updateItemChildren(prev, change.parentPath, newChildren);
+      });
+    });
+
     return () => {
       window.electronAPI.removeAllListeners('document:loaded');
       window.electronAPI.removeAllListeners('document:saved');
@@ -297,6 +391,7 @@ export function App() {
       window.electronAPI.removeAllListeners('file:opened');
       window.electronAPI.removeAllListeners('folder:opened');
       window.electronAPI.removeAllListeners('folder:changed');
+      unsubscribeFolderChildrenChanged();
     };
   }, []);
 
@@ -306,8 +401,10 @@ export function App() {
       <Sidebar
         items={sidebarItems}
         currentPath={state.basePath}
+        expandedFolders={expandedFolders}
+        loadingFolders={loadingFolders}
         onFileSelect={handleFileSelect}
-        onFolderSelect={handleFolderSelect}
+        onFolderToggle={handleFolderToggle}
         onNewDocument={handleNewDocument}
         onOpenDocument={handleOpenDocument}
         onRenameDocument={handleRenameDocument}

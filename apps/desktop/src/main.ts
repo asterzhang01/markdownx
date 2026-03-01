@@ -243,7 +243,9 @@ async function loadFolder(folderPath: string): Promise<void> {
 }
 
 /**
- * Scan current directory for mdx documents (non-recursive)
+ * Scan current directory for mdx documents and subfolders (non-recursive, lazy loading)
+ * - MDX documents are treated as 'file' type
+ * - Regular subfolders are treated as 'folder' type with children=undefined (not loaded yet)
  */
 async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
   const result: FileItem[] = [];
@@ -254,14 +256,26 @@ async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
     for (const entry of entries) {
       const fullPath = join(folderPath, entry.name);
       
+      // Skip hidden files and directories
+      if (entry.name.startsWith('.')) continue;
+      
       if (entry.isDirectory()) {
-        // Only check if it's an mdx document, don't recurse into subdirectories
+        // Check if it's an mdx document folder
         const isMdxDoc = await isMarkdownXDocument(fullPath, fsAdapter);
         if (isMdxDoc) {
+          // MDX document - treated as a file node
           result.push({
             name: entry.name,
             path: fullPath,
             type: 'file',
+          });
+        } else {
+          // Regular subfolder - marked as not loaded yet
+          result.push({
+            name: entry.name,
+            path: fullPath,
+            type: 'folder',
+            children: undefined, // Not loaded yet - lazy loading marker
           });
         }
       }
@@ -270,11 +284,15 @@ async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
     console.warn(`Cannot read folder: ${folderPath}`, error);
   }
   
-  return result;
+  // Sort: folders first, then files; alphabetical within each group
+  return result.sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === 'folder' ? -1 : 1;
+  });
 }
 
 /**
- * Setup folder watcher for automatic refresh
+ * Setup folder watcher for automatic refresh (supports multi-level)
  */
 async function setupFolderWatcher(folderPath: string): Promise<void> {
   // Clear previous watcher
@@ -283,30 +301,42 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
     folderWatcher = null;
   }
   
-  // Use chokidar to watch directory changes
+  // Use chokidar to watch directory changes with deep nesting support
   folderWatcher = watch(folderPath, {
     ignoreInitial: true,
-    depth: 0, // Only watch current directory, don't recurse
+    depth: 99, // Support deep nesting for multi-level file tree
+    ignored: [
+      '**/node_modules/**',
+      '**/.*/**', // Hidden directories
+      '**/.*',    // Hidden files
+    ],
   });
   
   folderWatcher.on('addDir', async (path) => {
-    // New folder added, check if it's an mdx document
+    // Skip the root folder itself
+    if (path === folderPath) return;
+    
+    // Check if it's an mdx document
     const isMdxDoc = await isMarkdownXDocument(path, fsAdapter);
-    if (isMdxDoc) {
-      mainWindow?.webContents.send('folder:changed', {
-        type: 'add',
-        item: {
-          name: basename(path),
-          path,
-          type: 'file',
-        },
-      });
-    }
+    const parentDir = dirname(path);
+    
+    // Notify renderer: children of parent directory changed
+    mainWindow?.webContents.send('folder:children-changed', {
+      parentPath: parentDir,
+      type: 'add',
+      item: {
+        name: basename(path),
+        path,
+        type: isMdxDoc ? 'file' : 'folder',
+        children: isMdxDoc ? undefined : undefined,
+      },
+    });
   });
   
   folderWatcher.on('unlinkDir', (path) => {
-    // Folder removed
-    mainWindow?.webContents.send('folder:changed', {
+    const parentDir = dirname(path);
+    mainWindow?.webContents.send('folder:children-changed', {
+      parentPath: parentDir,
       type: 'remove',
       path,
     });
@@ -345,19 +375,33 @@ async function handleOpenDocument(): Promise<void> {
     const stats = await fs.stat(selectedPath);
     
     if (stats.isFile()) {
-      // Mode A: Open single file
+      // Mode A: Open single file (index.md inside .mdx folder)
       // Stop folder watcher when switching to file mode
       if (folderWatcher) {
         await folderWatcher.close();
         folderWatcher = null;
       }
-      
+
       const parentDir = dirname(selectedPath);
       await loadDocument(parentDir);
       // Send single file info to renderer, don't scan entire directory
       mainWindow?.webContents.send('file:opened', {
         path: parentDir,
         name: basename(parentDir),
+      });
+    } else if (stats.isDirectory() && await isMarkdownXDocument(selectedPath, fsAdapter)) {
+      // Mode C: Open .mdx folder directly (e.g., macOS bundle)
+      // Stop folder watcher when switching to file mode
+      if (folderWatcher) {
+        await folderWatcher.close();
+        folderWatcher = null;
+      }
+
+      await loadDocument(selectedPath);
+      // Send single file info to renderer
+      mainWindow?.webContents.send('file:opened', {
+        path: selectedPath,
+        name: basename(selectedPath),
       });
     } else {
       // Mode B: Open folder
@@ -588,6 +632,11 @@ function setupIpcHandlers(): void {
   // Folder operations
   ipcMain.handle('folder:scan', async (_, folderPath: string) => {
     return scanFolderForMdx(folderPath);
+  });
+
+  // Load children for a specific folder (lazy loading)
+  ipcMain.handle('folder:load-children', async (_, folderPath: string) => {
+    return scanCurrentDir(folderPath);
   });
 }
 

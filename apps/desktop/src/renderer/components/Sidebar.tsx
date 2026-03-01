@@ -2,7 +2,7 @@
  * Sidebar Component - Left navigation panel
  * Supports opening files and folder directories
  */
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
   FolderIcon,
   DocumentIcon,
@@ -20,15 +20,16 @@ export interface FileItem {
   name: string;
   path: string;
   type: 'file' | 'folder';
-  children?: FileItem[];
-  isExpanded?: boolean;
+  children?: FileItem[] | undefined; // undefined = not loaded yet
 }
 
 interface SidebarProps {
   items: FileItem[];
   currentPath: string | null;
+  expandedFolders: Set<string>;
+  loadingFolders: Set<string>;
   onFileSelect: (path: string) => void;
-  onFolderSelect?: (path: string) => void;
+  onFolderToggle: (path: string) => void;
   onNewDocument: () => void;
   onOpenDocument: () => void;
   onRenameDocument?: (path: string, newName: string) => void;
@@ -40,6 +41,8 @@ function FileTreeItem({
   item,
   level,
   currentPath,
+  isExpanded,
+  isLoading,
   onFileSelect,
   onToggle,
   onContextMenu,
@@ -47,12 +50,15 @@ function FileTreeItem({
   item: FileItem;
   level: number;
   currentPath: string | null;
+  isExpanded: boolean;
+  isLoading: boolean;
   onFileSelect: (path: string) => void;
   onToggle: (path: string) => void;
   onContextMenu?: (e: React.MouseEvent, item: FileItem) => void;
 }) {
   const isSelected = currentPath === item.path;
   const paddingLeft = `${level * 12 + 8}px`;
+  const hasChildrenLoaded = item.children !== undefined;
 
   const handleClick = () => {
     if (item.type === 'folder') {
@@ -82,7 +88,12 @@ function FileTreeItem({
       >
         {item.type === 'folder' && (
           <span className="flex-shrink-0 w-4 h-4 text-gray-400">
-            {item.isExpanded ? (
+            {isLoading ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : isExpanded ? (
               <ChevronDownIcon className="w-4 h-4" />
             ) : (
               <ChevronRightIcon className="w-4 h-4" />
@@ -90,7 +101,7 @@ function FileTreeItem({
           </span>
         )}
         {item.type === 'folder' ? (
-          item.isExpanded ? (
+          isExpanded ? (
             <FolderOpenIcon className="w-4 h-4 flex-shrink-0 text-yellow-500" />
           ) : (
             <FolderIcon className="w-4 h-4 flex-shrink-0 text-yellow-500" />
@@ -100,7 +111,7 @@ function FileTreeItem({
         )}
         <span className="truncate">{item.name}</span>
       </button>
-      {item.type === 'folder' && item.isExpanded && item.children && (
+      {item.type === 'folder' && isExpanded && hasChildrenLoaded && item.children && (
         <div>
           {item.children.map((child) => (
             <FileTreeItem
@@ -108,8 +119,11 @@ function FileTreeItem({
               item={child}
               level={level + 1}
               currentPath={currentPath}
+              isExpanded={false} // Will be controlled by parent
+              isLoading={false}  // Will be controlled by parent
               onFileSelect={onFileSelect}
               onToggle={onToggle}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -121,43 +135,22 @@ function FileTreeItem({
 export function Sidebar({
   items,
   currentPath,
+  expandedFolders,
+  loadingFolders,
   onFileSelect,
+  onFolderToggle,
   onNewDocument,
   onOpenDocument,
   onRenameDocument,
   onDeleteDocument,
   onOpenInFinder,
 }: SidebarProps) {
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number } | null;
     item: FileItem | null;
   }>({ position: null, item: null });
   const [editingItem, setEditingItem] = useState<FileItem | null>(null);
   const [editName, setEditName] = useState('');
-
-  const handleToggle = useCallback((path: string) => {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  }, []);
-
-  // Apply expanded state to items
-  const applyExpandedState = (items: FileItem[]): FileItem[] => {
-    return items.map((item) => ({
-      ...item,
-      isExpanded: item.type === 'folder' ? expandedFolders.has(item.path) : undefined,
-      children: item.children ? applyExpandedState(item.children) : undefined,
-    }));
-  };
-
-  const displayItems = applyExpandedState(items);
 
   const handleContextMenu = (e: React.MouseEvent, item: FileItem) => {
     setContextMenu({
@@ -267,7 +260,7 @@ export function Sidebar({
 
       {/* File tree */}
       <div className="flex-1 overflow-y-auto py-2">
-        {displayItems.length === 0 ? (
+        {items.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <p className="text-sm text-gray-500 mb-4">
               No files or folders opened
@@ -277,7 +270,7 @@ export function Sidebar({
             </p>
           </div>
         ) : (
-          displayItems.map((item) => (
+          items.map((item) => (
             <div key={item.path}>
               {editingItem?.path === item.path ? (
                 <div className="px-2 py-1">
@@ -299,8 +292,10 @@ export function Sidebar({
                   item={item}
                   level={0}
                   currentPath={currentPath}
+                  isExpanded={expandedFolders.has(item.path)}
+                  isLoading={loadingFolders.has(item.path)}
                   onFileSelect={onFileSelect}
-                  onToggle={handleToggle}
+                  onToggle={onFolderToggle}
                   onContextMenu={handleContextMenu}
                 />
               )}

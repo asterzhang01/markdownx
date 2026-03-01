@@ -37,6 +37,7 @@ interface ElectronAPI {
   // Folder operations
   folder: {
     scan: (path: string) => Promise<FileItem[]>;
+    loadChildren: (path: string) => Promise<FileItem[]>;
   };
 
   // Shell operations
@@ -68,6 +69,7 @@ interface ElectronAPI {
   onFileOpened: (callback: (data: { path: string; name: string }) => void) => void;
   onFolderOpened: (callback: (data: { files: FileItem[]; folderPath: string }) => void) => void;
   onFolderChanged: (callback: (change: { type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => void;
+  onFolderChildrenChanged: (callback: (change: { parentPath: string; type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => () => void;
 
   // Remove listeners
   removeAllListeners: (channel: string) => void;
@@ -109,6 +111,7 @@ const api: ElectronAPI = {
 
   folder: {
     scan: (path) => ipcRenderer.invoke('folder:scan', path),
+    loadChildren: (path) => ipcRenderer.invoke('folder:load-children', path),
   },
 
   onDocumentLoaded: (callback) => {
@@ -137,6 +140,12 @@ const api: ElectronAPI = {
 
   onFolderChanged: (callback) => {
     ipcRenderer.on('folder:changed', (_, data) => callback(data));
+  },
+
+  onFolderChildrenChanged: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { parentPath: string; type: 'add' | 'remove'; item?: FileItem; path?: string }) => callback(data);
+    ipcRenderer.on('folder:children-changed', handler);
+    return () => ipcRenderer.removeListener('folder:children-changed', handler);
   },
 
   removeAllListeners: (channel) => {
