@@ -85,6 +85,9 @@ function Node({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
         e.stopPropagation();
         if (isFolder) {
           node.toggle();
+        } else {
+          node.select();
+          node.activate();
         }
       }}
     >
@@ -319,6 +322,10 @@ export function Sidebar({
   const handleNewDocumentInFolder = useCallback(() => {
     if (contextMenu.node && onCreateFile) {
       const folderPath = contextMenu.node.data.id;
+      // 如果目录未展开，先展开它
+      if (!contextMenu.node.isOpen) {
+        contextMenu.node.toggle();
+      }
       setInputDialog({
         isOpen: true,
         title: '新建文档',
@@ -335,6 +342,10 @@ export function Sidebar({
   const handleNewFolderInFolder = useCallback(() => {
     if (contextMenu.node && onCreateFolder) {
       const folderPath = contextMenu.node.data.id;
+      // 如果目录未展开，先展开它
+      if (!contextMenu.node.isOpen) {
+        contextMenu.node.toggle();
+      }
       setInputDialog({
         isOpen: true,
         title: '新建文件夹',
