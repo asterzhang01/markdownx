@@ -47,7 +47,7 @@ interface ElectronAPI {
 
   // Document operations
   document: {
-    new: () => Promise<string | null>;
+    new: (parentPath?: string, suggestedName?: string) => Promise<string | null>;
     open: () => Promise<boolean>;
     load: (path: string) => Promise<boolean>;
     save: (content: string) => Promise<boolean>;
@@ -69,7 +69,7 @@ interface ElectronAPI {
   onFileOpened: (callback: (data: { path: string; name: string }) => void) => void;
   onFolderOpened: (callback: (data: { files: FileItem[]; folderPath: string }) => void) => void;
   onFolderChanged: (callback: (change: { type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => void;
-  onFolderChildrenChanged: (callback: (change: { parentPath: string; type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => () => void;
+  onFolderChildrenChanged: (callback: (change: { parentPath: string; type: 'add' | 'remove' | 'rename'; item?: FileItem; path?: string; oldPath?: string; newPath?: string; name?: string }) => void) => () => void;
 
   // Remove listeners
   removeAllListeners: (channel: string) => void;
@@ -100,7 +100,7 @@ const api: ElectronAPI = {
   },
 
   document: {
-    new: () => ipcRenderer.invoke('document:new'),
+    new: (parentPath, suggestedName) => ipcRenderer.invoke('document:new', parentPath, suggestedName),
     open: () => ipcRenderer.invoke('document:open'),
     load: (path) => ipcRenderer.invoke('document:load', path),
     save: (content) => ipcRenderer.invoke('document:save', content),
@@ -143,7 +143,7 @@ const api: ElectronAPI = {
   },
 
   onFolderChildrenChanged: (callback) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { parentPath: string; type: 'add' | 'remove'; item?: FileItem; path?: string }) => callback(data);
+    const handler = (_event: Electron.IpcRendererEvent, data: { parentPath: string; type: 'add' | 'remove' | 'rename'; item?: FileItem; path?: string; oldPath?: string; newPath?: string; name?: string }) => callback(data);
     ipcRenderer.on('folder:children-changed', handler);
     return () => ipcRenderer.removeListener('folder:children-changed', handler);
   },

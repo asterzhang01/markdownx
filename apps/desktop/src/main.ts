@@ -152,9 +152,35 @@ function setupMenu(): void {
 
 /**
  * Handle creating a new document
+ * @param parentPath - Optional parent directory path for folder mode creation
+ * @param suggestedName - Optional suggested file name
  * @returns The path of the newly created document, or null if canceled
  */
-async function handleNewDocument(): Promise<string | null> {
+async function handleNewDocument(parentPath?: string, suggestedName?: string): Promise<string | null> {
+  // If parentPath is provided, we're in folder mode - create directly without dialog
+  if (parentPath) {
+    const fileName = suggestedName || 'Untitled.mdx';
+    let filePath = join(parentPath, fileName);
+    
+    // Auto-number if file exists
+    let counter = 1;
+    const baseName = fileName.replace(/\.mdx$/, '');
+    while (await fs.access(filePath).then(() => true).catch(() => false)) {
+      filePath = join(parentPath, `${baseName} ${counter}.mdx`);
+      counter++;
+    }
+    
+    // Create the document
+    await createMarkdownXDocument(filePath, fsAdapter);
+
+    // Note: We don't send 'folder:children-changed' event here.
+    // The watcher will detect the new directory and send the event automatically.
+    // This avoids duplicate events being sent to the renderer.
+
+    return filePath;
+  }
+  
+  // Single file mode - show save dialog
   const { filePath } = await dialog.showSaveDialog(mainWindow!, {
     title: 'Create New Document',
     defaultPath: 'Untitled.mdx',
@@ -230,19 +256,6 @@ async function scanFolderForMdx(folderPath: string): Promise<FileItem[]> {
 }
 
 /**
- * Load folder and send file tree to renderer
- */
-async function loadFolder(folderPath: string): Promise<void> {
-  const fileTree = await scanFolderForMdx(folderPath);
-  
-  // Send file tree to renderer
-  mainWindow?.webContents.send('folder:loaded', {
-    fileTree,
-    folderPath,
-  });
-}
-
-/**
  * Scan current directory for mdx documents and subfolders (non-recursive, lazy loading)
  * - MDX documents are treated as 'file' type
  * - Regular subfolders are treated as 'folder' type with children=undefined (not loaded yet)
@@ -300,7 +313,12 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
     await folderWatcher.close();
     folderWatcher = null;
   }
-  
+
+  // Pending unlinks for rename detection (macOS/Linux: unlinkDir + addDir pattern)
+  // Key: parentDir, Value: list of pending unlinks in that directory
+  const pendingUnlinks = new Map<string, Array<{ path: string; name: string; timeout: NodeJS.Timeout }>>();
+  const RENAME_DETECTION_DELAY = 200; // ms, increased for reliability
+
   // Use chokidar to watch directory changes with deep nesting support
   folderWatcher = watch(folderPath, {
     ignoreInitial: true,
@@ -311,34 +329,101 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
       '**/.*',    // Hidden files
     ],
   });
-  
+
   folderWatcher.on('addDir', async (path) => {
+    console.log('[watcher] addDir:', path);
     // Skip the root folder itself
     if (path === folderPath) return;
-    
+
+    const parentDir = dirname(path);
+    const name = basename(path);
+
+    // Check if there's a pending unlink in the same parent directory (rename detection)
+    const parentPending = pendingUnlinks.get(parentDir);
+    console.log('[watcher] addDir parentDir:', parentDir, 'hasPending:', !!(parentPending && parentPending.length > 0));
+    if (parentPending && parentPending.length > 0) {
+      // Take the first pending unlink (most likely to be the rename source)
+      const pending = parentPending.shift()!;
+      clearTimeout(pending.timeout);
+      
+      // Clean up empty array
+      if (parentPending.length === 0) {
+        pendingUnlinks.delete(parentDir);
+      }
+      
+      console.log('[watcher] Detected RENAME:', pending.path, '->', path);
+      mainWindow?.webContents.send('folder:children-changed', {
+        parentPath: parentDir,
+        type: 'rename',
+        oldPath: pending.path,
+        newPath: path,
+        name: name,
+      });
+      return;
+    }
+
     // Check if it's an mdx document
     const isMdxDoc = await isMarkdownXDocument(path, fsAdapter);
-    const parentDir = dirname(path);
-    
+    console.log('[watcher] addDir sending add event:', { parentDir, name, isMdxDoc });
+
     // Notify renderer: children of parent directory changed
     mainWindow?.webContents.send('folder:children-changed', {
       parentPath: parentDir,
       type: 'add',
       item: {
-        name: basename(path),
+        name: name,
         path,
         type: isMdxDoc ? 'file' : 'folder',
         children: isMdxDoc ? undefined : undefined,
       },
     });
   });
-  
+
   folderWatcher.on('unlinkDir', (path) => {
+    console.log('[watcher] unlinkDir:', path);
     const parentDir = dirname(path);
+    const name = basename(path);
+    
+    console.log('[watcher] unlinkDir parentDir:', parentDir, 'name:', name);
+
+    // Set a pending unlink - if an addDir happens soon in the same parent, it's a rename
+    const timeout = setTimeout(() => {
+      // No matching addDir, this is a real delete
+      console.log('[watcher] unlinkDir timeout expired, sending remove:', path);
+      const list = pendingUnlinks.get(parentDir);
+      if (list) {
+        const index = list.findIndex(p => p.path === path);
+        if (index >= 0) {
+          list.splice(index, 1);
+          if (list.length === 0) {
+            pendingUnlinks.delete(parentDir);
+          }
+        }
+      }
+      mainWindow?.webContents.send('folder:children-changed', {
+        parentPath: parentDir,
+        type: 'remove',
+        path,
+      });
+    }, RENAME_DETECTION_DELAY);
+
+    // Add to pending list for this parent directory
+    if (!pendingUnlinks.has(parentDir)) {
+      pendingUnlinks.set(parentDir, []);
+    }
+    pendingUnlinks.get(parentDir)!.push({ path, name, timeout });
+  });
+
+  // Handle rename events - chokidar emits 'rename' event on some platforms (Windows)
+  folderWatcher.on('rename', (oldPath, newPath) => {
+    console.log('[watcher] rename event:', oldPath, '->', newPath);
+    const parentDir = dirname(newPath);
     mainWindow?.webContents.send('folder:children-changed', {
       parentPath: parentDir,
-      type: 'remove',
-      path,
+      type: 'rename',
+      oldPath,
+      newPath,
+      name: basename(newPath),
     });
   });
 }
@@ -554,8 +639,8 @@ function setupIpcHandlers(): void {
   });
 
   // Document operations
-  ipcMain.handle('document:new', async () => {
-    const newPath = await handleNewDocument();
+  ipcMain.handle('document:new', async (_, parentPath?: string, suggestedName?: string) => {
+    const newPath = await handleNewDocument(parentPath, suggestedName);
     return newPath;
   });
 

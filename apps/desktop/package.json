@@ -17,7 +17,8 @@
     "@markdownx/core": "workspace:*",
     "@markdownx/editor-web": "workspace:*",
     "chokidar": "^4.0.0",
-    "electron-store": "^10.0.0"
+    "electron-store": "^10.0.0",
+    "react-arborist": "^3.4.3"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
@@ -52,13 +53,22 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   }
 }
