@@ -1,6 +1,7 @@
 /**
  * Electron Main Process
  * Handles window management, file system operations, and IPC communication
+ * Multi-window architecture: Welcome windows + Document windows
  */
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import { rm } from 'fs/promises';
@@ -24,18 +25,64 @@ interface FileItem {
   children?: FileItem[];
 }
 
-// State
-let mainWindow: BrowserWindow | null = null;
-let currentEngine: SyncEngine | null = null;
-let fileWatcher: FSWatcher | null = null;
-let folderWatcher: FSWatcher | null = null;
+// Window type definition
+type WindowType = 'welcome' | 'document';
+
+// Window state interface for multi-window management
+interface WindowState {
+  window: BrowserWindow;
+  type: WindowType;
+  id: number;
+  // Document-specific state
+  currentEngine: SyncEngine | null;
+  fileWatcher: FSWatcher | null;
+  folderWatcher: FSWatcher | null;
+  // Window-specific data
+  watchedFolder: string | null;
+  openFilePath: string | null;
+}
+
+// Global state
+const windowMap = new Map<number, WindowState>();
+let nextWindowId = 1;
 const fsAdapter = createNodeFsAdapter();
 
+// Get window state by window id
+function getWindowState(windowId: number): WindowState | undefined {
+  return windowMap.get(windowId);
+}
+
+// Get window state by BrowserWindow instance
+function getWindowStateByWindow(window: BrowserWindow): WindowState | undefined {
+  for (const state of windowMap.values()) {
+    if (state.window === window) {
+      return state;
+    }
+  }
+  return undefined;
+}
+
+// Send window info to renderer
+function sendWindowInfo(windowState: WindowState): void {
+  windowState.window.webContents.send('window:info', {
+    windowId: windowState.id,
+    windowType: windowState.type,
+    openFilePath: windowState.openFilePath,
+    watchedFolder: windowState.watchedFolder,
+  });
+}
+
 /**
- * Create the main application window
+ * Create a new window
+ * @param type - Window type: 'welcome' or 'document'
+ * @param filePath - Optional file path to open (for document windows)
+ * @param folderPath - Optional folder path to watch (for document windows)
+ * @returns The created window state
  */
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
+function createWindow(type: WindowType = 'welcome', filePath?: string, folderPath?: string): WindowState {
+  const windowId = nextWindowId++;
+  
+  const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 600,
@@ -45,22 +92,87 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Pass window info to renderer via additionalArguments
+      additionalArguments: [`--window-id=${windowId}`, `--window-type=${type}`],
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
+    show: false, // Don't show until ready
   });
+
+  // Create window state
+  const windowState: WindowState = {
+    window,
+    type,
+    id: windowId,
+    currentEngine: null,
+    fileWatcher: null,
+    folderWatcher: null,
+    watchedFolder: folderPath || null,
+    openFilePath: filePath || null,
+  };
+
+  // Store in window map
+  windowMap.set(windowId, windowState);
 
   // Load the renderer
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    window.loadURL('http://localhost:5173');
+    window.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+    window.loadFile(join(__dirname, '../renderer/index.html'));
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  // Show window when ready
+  window.once('ready-to-show', () => {
+    window.show();
+    // Send window info to renderer
+    sendWindowInfo(windowState);
   });
+
+  // Handle window closed
+  window.on('closed', () => {
+    // Cleanup window state
+    cleanupWindow(windowId);
+    windowMap.delete(windowId);
+  });
+
+  return windowState;
+}
+
+/**
+ * Cleanup window resources
+ */
+function cleanupWindow(windowId: number): void {
+  const state = windowMap.get(windowId);
+  if (!state) return;
+
+  // Cleanup engine
+  if (state.currentEngine) {
+    state.currentEngine.destroy();
+    state.currentEngine = null;
+  }
+
+  // Cleanup file watcher
+  if (state.fileWatcher) {
+    state.fileWatcher.close();
+    state.fileWatcher = null;
+  }
+
+  // Cleanup folder watcher
+  if (state.folderWatcher) {
+    state.folderWatcher.close();
+    state.folderWatcher = null;
+  }
+}
+
+/**
+ * Get the focused window state
+ */
+function getFocusedWindowState(): WindowState | undefined {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  if (!focusedWindow) return undefined;
+  return getWindowStateByWindow(focusedWindow);
 }
 
 /**
@@ -72,20 +184,69 @@ function setupMenu(): void {
       label: 'File',
       submenu: [
         {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => createWindow('welcome'),
+        },
+        {
           label: 'New Document',
           accelerator: 'CmdOrCtrl+N',
-          click: () => handleNewDocument(),
+          click: async () => {
+            // Always create a new window for new document
+            const { filePath } = await dialog.showSaveDialog({
+              title: 'Create New Document',
+              defaultPath: 'Untitled.mdx',
+              filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
+              properties: ['createDirectory'],
+            });
+
+            if (filePath) {
+              // Create document first
+              await createMarkdownXDocument(filePath, fsAdapter);
+              // Then open in new window
+              await openDocumentInNewWindow(filePath, true);
+            }
+          },
         },
         {
           label: 'Open...',
           accelerator: 'CmdOrCtrl+O',
-          click: () => handleOpenDocument(),
+          click: async () => {
+            // Always create a new window for opening
+            const result = await dialog.showOpenDialog({
+              title: 'Open Document or Folder',
+              filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
+              properties: ['openFile', 'openDirectory'],
+            });
+
+            if (!result.canceled && result.filePaths.length > 0) {
+              const selectedPath = result.filePaths[0];
+              const stats = await fs.stat(selectedPath);
+
+              if (stats.isFile()) {
+                // Open single file in new window
+                const parentDir = dirname(selectedPath);
+                await openDocumentInNewWindow(parentDir);
+              } else if (stats.isDirectory() && await isMarkdownXDocument(selectedPath, fsAdapter)) {
+                // Open .mdx folder directly in new window
+                await openDocumentInNewWindow(selectedPath);
+              } else {
+                // Open folder in new window
+                await openFolderInNewWindow(selectedPath);
+              }
+            }
+          },
         },
         { type: 'separator' },
         {
           label: 'Save',
           accelerator: 'CmdOrCtrl+S',
-          click: () => handleSave(),
+          click: () => {
+            const state = getFocusedWindowState();
+            if (state) {
+              handleSave(state);
+            }
+          },
         },
         { type: 'separator' },
         { role: 'quit' },
@@ -152,11 +313,12 @@ function setupMenu(): void {
 
 /**
  * Handle creating a new document
+ * @param windowState - The window state to create document in
  * @param parentPath - Optional parent directory path for folder mode creation
  * @param suggestedName - Optional suggested file name
  * @returns The path of the newly created document, or null if canceled
  */
-async function handleNewDocument(parentPath?: string, suggestedName?: string): Promise<string | null> {
+async function handleNewDocument(windowState: WindowState, parentPath?: string, suggestedName?: string): Promise<string | null> {
   // If parentPath is provided, we're in folder mode - create directly without dialog
   if (parentPath) {
     const fileName = suggestedName || 'Untitled.mdx';
@@ -173,15 +335,11 @@ async function handleNewDocument(parentPath?: string, suggestedName?: string): P
     // Create the document
     await createMarkdownXDocument(filePath, fsAdapter);
 
-    // Note: We don't send 'folder:children-changed' event here.
-    // The watcher will detect the new directory and send the event automatically.
-    // This avoids duplicate events being sent to the renderer.
-
     return filePath;
   }
   
   // Single file mode - show save dialog
-  const { filePath } = await dialog.showSaveDialog(mainWindow!, {
+  const { filePath } = await dialog.showSaveDialog(windowState.window, {
     title: 'Create New Document',
     defaultPath: 'Untitled.mdx',
     filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
@@ -189,16 +347,18 @@ async function handleNewDocument(parentPath?: string, suggestedName?: string): P
   });
 
   if (filePath) {
+    // Always load in current window (welcome page actions open in same window)
+    // Menu actions (New Window) will create new windows separately
     // Stop folder watcher when creating new file (switch to file mode)
-    if (folderWatcher) {
-      await folderWatcher.close();
-      folderWatcher = null;
+    if (windowState.folderWatcher) {
+      await windowState.folderWatcher.close();
+      windowState.folderWatcher = null;
     }
     
-    await loadDocument(filePath, true);
+    await loadDocumentInWindow(windowState, filePath, true);
     
-    // Send file:opened event to update sidebar
-    mainWindow?.webContents.send('file:opened', {
+    // Send file:opened event to update sidebar in single file mode
+    windowState.window.webContents.send('file:opened', {
       path: filePath,
       name: basename(filePath),
     });
@@ -257,8 +417,6 @@ async function scanFolderForMdx(folderPath: string): Promise<FileItem[]> {
 
 /**
  * Scan current directory for mdx documents and subfolders (non-recursive, lazy loading)
- * - MDX documents are treated as 'file' type
- * - Regular subfolders are treated as 'folder' type with children=undefined (not loaded yet)
  */
 async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
   const result: FileItem[] = [];
@@ -307,52 +465,46 @@ async function scanCurrentDir(folderPath: string): Promise<FileItem[]> {
 /**
  * Setup folder watcher for automatic refresh (supports multi-level)
  */
-async function setupFolderWatcher(folderPath: string): Promise<void> {
+async function setupFolderWatcher(windowState: WindowState, folderPath: string): Promise<void> {
   // Clear previous watcher
-  if (folderWatcher) {
-    await folderWatcher.close();
-    folderWatcher = null;
+  if (windowState.folderWatcher) {
+    await windowState.folderWatcher.close();
+    windowState.folderWatcher = null;
   }
 
-  // Pending unlinks for rename detection (macOS/Linux: unlinkDir + addDir pattern)
-  // Key: parentDir, Value: list of pending unlinks in that directory
+  // Pending unlinks for rename detection
   const pendingUnlinks = new Map<string, Array<{ path: string; name: string; timeout: NodeJS.Timeout }>>();
-  const RENAME_DETECTION_DELAY = 200; // ms, increased for reliability
+  const RENAME_DETECTION_DELAY = 200;
 
   // Use chokidar to watch directory changes with deep nesting support
-  folderWatcher = watch(folderPath, {
+  windowState.folderWatcher = watch(folderPath, {
     ignoreInitial: true,
-    depth: 99, // Support deep nesting for multi-level file tree
+    depth: 99,
     ignored: [
       '**/node_modules/**',
-      '**/.*/**', // Hidden directories
-      '**/.*',    // Hidden files
+      '**/.*/**',
+      '**/.*',
     ],
   });
 
-  folderWatcher.on('addDir', async (path) => {
+  windowState.folderWatcher.on('addDir', async (path: string) => {
     console.log('[watcher] addDir:', path);
-    // Skip the root folder itself
     if (path === folderPath) return;
 
     const parentDir = dirname(path);
     const name = basename(path);
 
-    // Check if there's a pending unlink in the same parent directory (rename detection)
     const parentPending = pendingUnlinks.get(parentDir);
-    console.log('[watcher] addDir parentDir:', parentDir, 'hasPending:', !!(parentPending && parentPending.length > 0));
     if (parentPending && parentPending.length > 0) {
-      // Take the first pending unlink (most likely to be the rename source)
       const pending = parentPending.shift()!;
       clearTimeout(pending.timeout);
       
-      // Clean up empty array
       if (parentPending.length === 0) {
         pendingUnlinks.delete(parentDir);
       }
       
       console.log('[watcher] Detected RENAME:', pending.path, '->', path);
-      mainWindow?.webContents.send('folder:children-changed', {
+      windowState.window.webContents.send('folder:children-changed', {
         parentPath: parentDir,
         type: 'rename',
         oldPath: pending.path,
@@ -362,34 +514,27 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
       return;
     }
 
-    // Check if it's an mdx document
     const isMdxDoc = await isMarkdownXDocument(path, fsAdapter);
     console.log('[watcher] addDir sending add event:', { parentDir, name, isMdxDoc });
 
-    // Notify renderer: children of parent directory changed
-    mainWindow?.webContents.send('folder:children-changed', {
+    windowState.window.webContents.send('folder:children-changed', {
       parentPath: parentDir,
       type: 'add',
       item: {
         name: name,
         path,
         type: isMdxDoc ? 'file' : 'folder',
-        children: isMdxDoc ? undefined : undefined,
+        children: undefined,
       },
     });
   });
 
-  folderWatcher.on('unlinkDir', (path) => {
+  windowState.folderWatcher.on('unlinkDir', (path: string) => {
     console.log('[watcher] unlinkDir:', path);
     const parentDir = dirname(path);
     const name = basename(path);
     
-    console.log('[watcher] unlinkDir parentDir:', parentDir, 'name:', name);
-
-    // Set a pending unlink - if an addDir happens soon in the same parent, it's a rename
     const timeout = setTimeout(() => {
-      // No matching addDir, this is a real delete
-      console.log('[watcher] unlinkDir timeout expired, sending remove:', path);
       const list = pendingUnlinks.get(parentDir);
       if (list) {
         const index = list.findIndex(p => p.path === path);
@@ -400,25 +545,23 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
           }
         }
       }
-      mainWindow?.webContents.send('folder:children-changed', {
+      windowState.window.webContents.send('folder:children-changed', {
         parentPath: parentDir,
         type: 'remove',
         path,
       });
     }, RENAME_DETECTION_DELAY);
 
-    // Add to pending list for this parent directory
     if (!pendingUnlinks.has(parentDir)) {
       pendingUnlinks.set(parentDir, []);
     }
     pendingUnlinks.get(parentDir)!.push({ path, name, timeout });
   });
 
-  // Handle rename events - chokidar emits 'rename' event on some platforms (Windows)
-  folderWatcher.on('rename', (oldPath, newPath) => {
+  windowState.folderWatcher.on('rename', (oldPath: string, newPath: string) => {
     console.log('[watcher] rename event:', oldPath, '->', newPath);
     const parentDir = dirname(newPath);
-    mainWindow?.webContents.send('folder:children-changed', {
+    windowState.window.webContents.send('folder:children-changed', {
       parentPath: parentDir,
       type: 'rename',
       oldPath,
@@ -431,25 +574,32 @@ async function setupFolderWatcher(folderPath: string): Promise<void> {
 /**
  * Open folder mode - scan and watch directory
  */
-async function openFolder(folderPath: string): Promise<void> {
+async function openFolderInWindow(windowState: WindowState, folderPath: string): Promise<void> {
+  // Update window state
+  windowState.watchedFolder = folderPath;
+  windowState.type = 'document';
+  
   // Scan current directory for mdx files (non-recursive)
   const files = await scanCurrentDir(folderPath);
   
   // Send file list to renderer
-  mainWindow?.webContents.send('folder:opened', {
+  windowState.window.webContents.send('folder:opened', {
     files,
     folderPath,
   });
   
+  // Send updated window info
+  sendWindowInfo(windowState);
+  
   // Setup file system watcher
-  await setupFolderWatcher(folderPath);
+  await setupFolderWatcher(windowState, folderPath);
 }
 
 /**
  * Handle opening an existing document or folder
  */
-async function handleOpenDocument(): Promise<void> {
-  const result = await dialog.showOpenDialog(mainWindow!, {
+async function handleOpenDocument(windowState: WindowState): Promise<void> {
+  const result = await dialog.showOpenDialog(windowState.window, {
     title: 'Open Document or Folder',
     filters: [{ name: 'MarkdownX', extensions: ['mdx'] }],
     properties: ['openFile', 'openDirectory'],
@@ -459,48 +609,48 @@ async function handleOpenDocument(): Promise<void> {
     const selectedPath = result.filePaths[0];
     const stats = await fs.stat(selectedPath);
     
+    // Always open in current window (welcome page actions open in same window)
+    // Menu actions (New Window) will create new windows separately
     if (stats.isFile()) {
-      // Mode A: Open single file (index.md inside .mdx folder)
-      // Stop folder watcher when switching to file mode
-      if (folderWatcher) {
-        await folderWatcher.close();
-        folderWatcher = null;
+      // Mode A: Open single file
+      if (windowState.folderWatcher) {
+        await windowState.folderWatcher.close();
+        windowState.folderWatcher = null;
       }
 
       const parentDir = dirname(selectedPath);
-      await loadDocument(parentDir);
-      // Send single file info to renderer, don't scan entire directory
-      mainWindow?.webContents.send('file:opened', {
+      await loadDocumentInWindow(windowState, parentDir);
+      
+      // Send file:opened event with the .mdx folder path (not parent dir)
+      windowState.window.webContents.send('file:opened', {
         path: parentDir,
         name: basename(parentDir),
       });
     } else if (stats.isDirectory() && await isMarkdownXDocument(selectedPath, fsAdapter)) {
-      // Mode C: Open .mdx folder directly (e.g., macOS bundle)
-      // Stop folder watcher when switching to file mode
-      if (folderWatcher) {
-        await folderWatcher.close();
-        folderWatcher = null;
+      // Mode C: Open .mdx folder directly
+      if (windowState.folderWatcher) {
+        await windowState.folderWatcher.close();
+        windowState.folderWatcher = null;
       }
 
-      await loadDocument(selectedPath);
-      // Send single file info to renderer
-      mainWindow?.webContents.send('file:opened', {
+      await loadDocumentInWindow(windowState, selectedPath);
+      
+      windowState.window.webContents.send('file:opened', {
         path: selectedPath,
         name: basename(selectedPath),
       });
     } else {
       // Mode B: Open folder
-      // Clean up current document when switching to folder mode
-      if (currentEngine) {
-        currentEngine.destroy();
-        currentEngine = null;
+      if (windowState.currentEngine) {
+        windowState.currentEngine.destroy();
+        windowState.currentEngine = null;
       }
-      if (fileWatcher) {
-        await fileWatcher.close();
-        fileWatcher = null;
+      if (windowState.fileWatcher) {
+        await windowState.fileWatcher.close();
+        windowState.fileWatcher = null;
       }
       
-      await openFolder(selectedPath);
+      await openFolderInWindow(windowState, selectedPath);
     }
   }
 }
@@ -508,79 +658,126 @@ async function handleOpenDocument(): Promise<void> {
 /**
  * Handle save command
  */
-async function handleSave(): Promise<void> {
-  if (currentEngine) {
-    await currentEngine.forceSave();
-    mainWindow?.webContents.send('document:saved');
+async function handleSave(windowState: WindowState): Promise<void> {
+  if (windowState.currentEngine) {
+    await windowState.currentEngine.forceSave();
+    windowState.window.webContents.send('document:saved');
   }
 }
 
 /**
- * Load a document (new or existing)
+ * Load a document in a specific window
  */
-async function loadDocument(path: string, isNew = false): Promise<void> {
+async function loadDocumentInWindow(windowState: WindowState, path: string, isNew = false): Promise<void> {
   // Cleanup previous engine
-  if (currentEngine) {
-    currentEngine.destroy();
-    currentEngine = null;
+  if (windowState.currentEngine) {
+    windowState.currentEngine.destroy();
+    windowState.currentEngine = null;
   }
 
   // Stop previous watcher
-  if (fileWatcher) {
-    await fileWatcher.close();
-    fileWatcher = null;
+  if (windowState.fileWatcher) {
+    await windowState.fileWatcher.close();
+    windowState.fileWatcher = null;
   }
 
   // Create or load document
   if (isNew) {
-    currentEngine = await createMarkdownXDocument(path, fsAdapter);
+    windowState.currentEngine = await createMarkdownXDocument(path, fsAdapter);
   } else {
-    // Check if valid document
     const isValid = await isMarkdownXDocument(path, fsAdapter);
     if (!isValid) {
       dialog.showErrorBox('Invalid Document', 'The selected folder is not a valid MarkdownX document.');
       return;
     }
 
-    currentEngine = createSyncEngine({
+    windowState.currentEngine = createSyncEngine({
       basePath: path,
       fsAdapter,
       onExternalChange: (content) => {
-        mainWindow?.webContents.send('document:external-change', content);
+        windowState.window.webContents.send('document:external-change', content);
       },
     });
 
-    await currentEngine.load();
+    await windowState.currentEngine.load();
   }
 
+  // Update window state
+  windowState.openFilePath = path;
+  windowState.type = 'document';
+
   // Setup file watcher for external changes
-  fileWatcher = watch(join(path, 'index.md'), {
+  windowState.fileWatcher = watch(join(path, 'index.md'), {
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 300 },
   });
 
-  fileWatcher.on('change', async () => {
-    if (currentEngine) {
-      await currentEngine.handleExternalIndexChange();
+  windowState.fileWatcher.on('change', async () => {
+    if (windowState.currentEngine) {
+      await windowState.currentEngine.handleExternalIndexChange();
     }
   });
 
   // Send to renderer
-  mainWindow?.webContents.send('document:loaded', {
-    content: currentEngine.getContent(),
-    manifest: currentEngine.getManifest(),
+  windowState.window.webContents.send('document:loaded', {
+    content: windowState.currentEngine.getContent(),
+    manifest: windowState.currentEngine.getManifest(),
     basePath: path,
   });
 
+  // Send updated window info
+  sendWindowInfo(windowState);
+
   // Update window title
   const docName = path.split('/').pop() || 'Untitled';
-  mainWindow?.setTitle(`${docName} - MarkdownX`);
+  windowState.window.setTitle(`${docName} - MarkdownX`);
+}
+
+/**
+ * Open a document in a new window
+ */
+async function openDocumentInNewWindow(filePath: string, isNew = false): Promise<WindowState> {
+  const newWindow = createWindow('document', filePath);
+
+  // Wait for window to be ready then load document
+  newWindow.window.once('ready-to-show', async () => {
+    await loadDocumentInWindow(newWindow, filePath, isNew);
+
+    // Send file:opened event to update sidebar (single file mode)
+    newWindow.window.webContents.send('file:opened', {
+      path: filePath,
+      name: basename(filePath),
+    });
+  });
+
+  return newWindow;
+}
+
+/**
+ * Open a folder in a new window
+ */
+async function openFolderInNewWindow(folderPath: string): Promise<WindowState> {
+  const newWindow = createWindow('document', undefined, folderPath);
+  
+  // Wait for window to be ready then open folder
+  newWindow.window.once('ready-to-show', async () => {
+    await openFolderInWindow(newWindow, folderPath);
+  });
+  
+  return newWindow;
 }
 
 /**
  * Setup IPC handlers for file system operations
  */
 function setupIpcHandlers(): void {
+  // Helper to get window state from event
+  const getStateFromEvent = (event: Electron.IpcMainInvokeEvent): WindowState | undefined => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return undefined;
+    return getWindowStateByWindow(window);
+  };
+
   // File system operations
   ipcMain.handle('fs:readFile', async (_, path: string) => {
     const buffer = await fs.readFile(path);
@@ -639,37 +836,44 @@ function setupIpcHandlers(): void {
   });
 
   // Document operations
-  ipcMain.handle('document:new', async (_, parentPath?: string, suggestedName?: string) => {
-    const newPath = await handleNewDocument(parentPath, suggestedName);
+  ipcMain.handle('document:new', async (event, parentPath?: string, suggestedName?: string) => {
+    const state = getStateFromEvent(event);
+    if (!state) return null;
+    const newPath = await handleNewDocument(state, parentPath, suggestedName);
     return newPath;
   });
 
-  ipcMain.handle('document:open', async () => {
-    await handleOpenDocument();
+  ipcMain.handle('document:open', async (event) => {
+    const state = getStateFromEvent(event);
+    if (!state) return false;
+    await handleOpenDocument(state);
     return true;
   });
 
-  ipcMain.handle('document:load', async (_, filePath: string) => {
-    await loadDocument(filePath);
+  ipcMain.handle('document:load', async (event, filePath: string) => {
+    const state = getStateFromEvent(event);
+    if (!state) return false;
+    await loadDocumentInWindow(state, filePath);
     return true;
   });
 
-  ipcMain.handle('document:save', async (_, content: string) => {
-    if (currentEngine) {
-      await currentEngine.applyChange(content);
-      await currentEngine.forceSave();
-      return true;
-    }
-    return false;
+  ipcMain.handle('document:save', async (event, content: string) => {
+    const state = getStateFromEvent(event);
+    if (!state || !state.currentEngine) return false;
+    await state.currentEngine.applyChange(content);
+    await state.currentEngine.forceSave();
+    return true;
   });
 
-  ipcMain.handle('document:get-content', async () => {
-    return currentEngine?.getContent() ?? '';
+  ipcMain.handle('document:get-content', async (event) => {
+    const state = getStateFromEvent(event);
+    return state?.currentEngine?.getContent() ?? '';
   });
 
   // Image upload
-  ipcMain.handle('document:upload-image', async (_, data: number[], fileName: string) => {
-    if (!currentEngine) {
+  ipcMain.handle('document:upload-image', async (event, data: number[], fileName: string) => {
+    const state = getStateFromEvent(event);
+    if (!state || !state.currentEngine) {
       throw new Error('No document loaded');
     }
 
@@ -677,24 +881,47 @@ function setupIpcHandlers(): void {
     const assetInfo = await processImage(
       uint8Array,
       fileName,
-      currentEngine.getAssetsDir(),
+      state.currentEngine.getAssetsDir(),
       fsAdapter
     );
 
     return assetInfo.relativePath;
   });
 
-  ipcMain.handle('document:close', async () => {
-    // Cleanup current engine
-    if (currentEngine) {
-      currentEngine.destroy();
-      currentEngine = null;
+  ipcMain.handle('document:close', async (event) => {
+    const state = getStateFromEvent(event);
+    if (!state) return;
+    
+    if (state.currentEngine) {
+      state.currentEngine.destroy();
+      state.currentEngine = null;
     }
-    // Stop file watcher
-    if (fileWatcher) {
-      await fileWatcher.close();
-      fileWatcher = null;
+    if (state.fileWatcher) {
+      await state.fileWatcher.close();
+      state.fileWatcher = null;
     }
+  });
+
+  // Window operations
+  ipcMain.handle('window:get-info', async (event) => {
+    const state = getStateFromEvent(event);
+    if (!state) return null;
+    return {
+      windowId: state.id,
+      windowType: state.type,
+      openFilePath: state.openFilePath,
+      watchedFolder: state.watchedFolder,
+    };
+  });
+
+  ipcMain.handle('window:open-document', async (_, filePath: string) => {
+    await openDocumentInNewWindow(filePath);
+    return true;
+  });
+
+  ipcMain.handle('window:open-folder', async (_, folderPath: string) => {
+    await openFolderInNewWindow(folderPath);
+    return true;
   });
 
   // Shell operations
@@ -703,8 +930,11 @@ function setupIpcHandlers(): void {
   });
 
   // Dialog operations
-  ipcMain.handle('dialog:show-confirm', async (_, message: string) => {
-    const result = await dialog.showMessageBox(mainWindow!, {
+  ipcMain.handle('dialog:show-confirm', async (event, message: string) => {
+    const state = getStateFromEvent(event);
+    if (!state) return false;
+    
+    const result = await dialog.showMessageBox(state.window, {
       type: 'question',
       buttons: ['取消', '确认'],
       defaultId: 1,
@@ -719,7 +949,6 @@ function setupIpcHandlers(): void {
     return scanFolderForMdx(folderPath);
   });
 
-  // Load children for a specific folder (lazy loading)
   ipcMain.handle('folder:load-children', async (_, folderPath: string) => {
     return scanCurrentDir(folderPath);
   });
@@ -729,11 +958,11 @@ function setupIpcHandlers(): void {
 app.whenReady().then(() => {
   setupIpcHandlers();
   setupMenu();
-  createWindow();
+  createWindow('welcome');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createWindow('welcome');
     }
   });
 });
@@ -745,13 +974,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (currentEngine) {
-    currentEngine.destroy();
+  // Cleanup all windows
+  for (const [windowId, state] of windowMap) {
+    cleanupWindow(windowId);
   }
-  if (fileWatcher) {
-    fileWatcher.close();
-  }
-  if (folderWatcher) {
-    folderWatcher.close();
-  }
+  windowMap.clear();
 });

@@ -12,6 +12,14 @@ interface FileItem {
   children?: FileItem[];
 }
 
+// Window info type
+interface WindowInfo {
+  windowId: number;
+  windowType: 'welcome' | 'document';
+  openFilePath: string | null;
+  watchedFolder: string | null;
+}
+
 // Types for exposed APIs
 interface ElectronAPI {
   // File system operations
@@ -56,6 +64,13 @@ interface ElectronAPI {
     close: () => Promise<void>;
   };
 
+  // Window operations
+  window: {
+    getInfo: () => Promise<WindowInfo | null>;
+    openDocument: (filePath: string) => Promise<boolean>;
+    openFolder: (folderPath: string) => Promise<boolean>;
+  };
+
   // Dialog operations
   dialog: {
     showConfirm: (message: string) => Promise<boolean>;
@@ -70,6 +85,7 @@ interface ElectronAPI {
   onFolderOpened: (callback: (data: { files: FileItem[]; folderPath: string }) => void) => void;
   onFolderChanged: (callback: (change: { type: 'add' | 'remove'; item?: FileItem; path?: string }) => void) => void;
   onFolderChildrenChanged: (callback: (change: { parentPath: string; type: 'add' | 'remove' | 'rename'; item?: FileItem; path?: string; oldPath?: string; newPath?: string; name?: string }) => void) => () => void;
+  onWindowInfo: (callback: (info: WindowInfo) => void) => () => void;
 
   // Remove listeners
   removeAllListeners: (channel: string) => void;
@@ -109,6 +125,12 @@ const api: ElectronAPI = {
     close: () => ipcRenderer.invoke('document:close'),
   },
 
+  window: {
+    getInfo: () => ipcRenderer.invoke('window:get-info'),
+    openDocument: (filePath) => ipcRenderer.invoke('window:open-document', filePath),
+    openFolder: (folderPath) => ipcRenderer.invoke('window:open-folder', folderPath),
+  },
+
   folder: {
     scan: (path) => ipcRenderer.invoke('folder:scan', path),
     loadChildren: (path) => ipcRenderer.invoke('folder:load-children', path),
@@ -146,6 +168,12 @@ const api: ElectronAPI = {
     const handler = (_event: Electron.IpcRendererEvent, data: { parentPath: string; type: 'add' | 'remove' | 'rename'; item?: FileItem; path?: string; oldPath?: string; newPath?: string; name?: string }) => callback(data);
     ipcRenderer.on('folder:children-changed', handler);
     return () => ipcRenderer.removeListener('folder:children-changed', handler);
+  },
+
+  onWindowInfo: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: WindowInfo) => callback(info);
+    ipcRenderer.on('window:info', handler);
+    return () => ipcRenderer.removeListener('window:info', handler);
   },
 
   removeAllListeners: (channel) => {

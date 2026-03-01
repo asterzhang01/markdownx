@@ -1,6 +1,7 @@
 /**
  * Renderer Process - Main App Component
  * Layout: Left sidebar (navigation) + Right content (welcome/editor)
+ * Multi-window support: Welcome window vs Document window
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { EditorHandle } from '@markdownx/editor-web';
@@ -24,7 +25,20 @@ interface FileItem {
   children?: FileItem[] | undefined; // undefined = not loaded yet (lazy loading)
 }
 
+type WindowType = 'welcome' | 'document';
+
+interface WindowInfo {
+  windowId: number;
+  windowType: WindowType;
+  openFilePath: string | null;
+  watchedFolder: string | null;
+}
+
 export function App() {
+  // Window type state
+  const [windowType, setWindowType] = useState<WindowType>('welcome');
+  const [windowInfo, setWindowInfo] = useState<WindowInfo | null>(null);
+  
   const [state, setState] = useState<DocumentState>({
     content: '',
     manifest: null,
@@ -74,6 +88,14 @@ export function App() {
   const handleNewDocument = useCallback(async () => {
     if (!window.electronAPI) return;
 
+    // In Welcome window: create new document in new window
+    if (windowType === 'welcome') {
+      // Let main process handle creating new window with document
+      await window.electronAPI.document.new();
+      return;
+    }
+
+    // In Document window
     // In folder mode, create in the watched folder root
     const parentPath = openMode === 'folder' && watchedFolder ? watchedFolder : undefined;
     const newPath = await window.electronAPI.document.new(parentPath);
@@ -81,10 +103,8 @@ export function App() {
     if (newPath) {
       if (openMode === 'folder' && watchedFolder) {
         // In folder mode, optimistically add the new file to sidebarItems
-        // The watcher will also detect it, but we add it immediately for better UX
         const fileName = newPath.split('/').pop() || 'Untitled';
         setSidebarItems(prev => {
-          // Check if already exists (avoid duplicates)
           if (prev.some(item => item.path === newPath)) {
             return prev;
           }
@@ -93,15 +113,13 @@ export function App() {
             path: newPath,
             type: 'file' as const,
           }];
-          // Sort: folders first, then files; alphabetical within each group
           return newItems.sort((a, b) => {
             if (a.type === b.type) return a.name.localeCompare(b.name);
             return a.type === 'folder' ? -1 : 1;
           });
         });
       } else {
-        // Single file mode, switch to single file view
-        // newPath is the .mdx folder path, display it directly
+        // Single file mode
         setOpenMode('file');
         setWatchedFolder(null);
         setSidebarItems([{
@@ -111,7 +129,7 @@ export function App() {
         }]);
       }
     }
-  }, [openMode, watchedFolder]);
+  }, [openMode, watchedFolder, windowType]);
 
   // Handle creating a new document in a specific folder (for context menu)
   const handleCreateDocument = useCallback(async (parentPath: string | null, name: string) => {
@@ -143,9 +161,15 @@ export function App() {
   const handleOpenDocument = useCallback(async () => {
     if (!window.electronAPI) return;
 
-    // Trigger open dialog in main process
+    // In Welcome window: open in new window
+    if (windowType === 'welcome') {
+      await window.electronAPI.document.open();
+      return;
+    }
+
+    // In Document window: open in current window
     await window.electronAPI.document.open();
-  }, []);
+  }, [windowType]);
 
   // Handle file selection from sidebar
   const handleFileSelect = useCallback(async (path: string) => {
@@ -394,12 +418,18 @@ export function App() {
           lastSaved: null,
         });
         setIsLoading(false);
+        
+        // In single file mode, also clear sidebarItems to hide sidebar
+        if (openMode === 'file') {
+          setSidebarItems([]);
+          setOpenMode(null);
+        }
       }
     } catch (error) {
       console.error('Failed to delete document:', error);
       alert('删除文档失败');
     }
-  }, [state.basePath]);
+  }, [state.basePath, openMode]);
 
   // Handle open in Finder
   const handleOpenInFinder = useCallback(async (path: string) => {
@@ -412,9 +442,22 @@ export function App() {
     }
   }, []);
 
-  // Listen for document events from main process
+  // Listen for window info and document events from main process
   useEffect(() => {
     if (!window.electronAPI) return;
+
+    // Window info received
+    const unsubscribeWindowInfo = window.electronAPI.onWindowInfo((info) => {
+      console.log('[renderer] Window info received:', info);
+      setWindowInfo(info);
+      setWindowType(info.windowType);
+      
+      // If it's a document window with a watched folder, update state
+      if (info.watchedFolder) {
+        setWatchedFolder(info.watchedFolder);
+        setOpenMode('folder');
+      }
+    });
 
     // Document loaded
     window.electronAPI.onDocumentLoaded((data) => {
@@ -557,39 +600,56 @@ export function App() {
       window.electronAPI.removeAllListeners('folder:opened');
       window.electronAPI.removeAllListeners('folder:changed');
       unsubscribeFolderChildrenChanged();
+      unsubscribeWindowInfo();
     };
   }, []);
 
   // Determine if sidebar should be shown (only when a document/folder is open)
-  const showSidebar = state.basePath !== null || sidebarItems.length > 0;
+  const showSidebar = state.basePath !== null || sidebarItems.length > 0 || windowType === 'document';
 
-  return (
-    <div className="flex h-screen bg-white">
-      {/* Left Sidebar - only show when document/folder is open */}
-      {showSidebar && (
-        <Sidebar
-          items={sidebarItems}
-          currentPath={state.basePath}
-          expandedFolders={expandedFolders}
-          loadingFolders={loadingFolders}
-          rootPath={watchedFolder}
-          onFileSelect={handleFileSelect}
-          onFolderToggle={handleFolderToggle}
-          onNewDocument={handleNewDocument}
-          onOpenDocument={handleOpenDocument}
-          onRenameDocument={handleRenameDocument}
-          onDeleteDocument={handleDeleteDocument}
-          onOpenInFinder={handleOpenInFinder}
-          onCreateFile={handleCreateDocument}
-        />
-      )}
-
-      {/* Right Content Area */}
-      {!state.basePath && !isLoading ? (
+  // Welcome Window: Show full welcome page (no sidebar)
+  if (windowType === 'welcome') {
+    return (
+      <div className="flex h-screen bg-white">
         <WelcomePage
           onNewDocument={handleNewDocument}
           onOpenDocument={handleOpenDocument}
         />
+      </div>
+    );
+  }
+
+  // Document Window: Show sidebar + editor (or empty state if no file selected)
+  return (
+    <div className="flex h-screen bg-white">
+      {/* Left Sidebar - always show in document window */}
+      <Sidebar
+        items={sidebarItems}
+        currentPath={state.basePath}
+        expandedFolders={expandedFolders}
+        loadingFolders={loadingFolders}
+        rootPath={watchedFolder}
+        mode={openMode}
+        onFileSelect={handleFileSelect}
+        onFolderToggle={handleFolderToggle}
+        onNewDocument={handleNewDocument}
+        onOpenDocument={handleOpenDocument}
+        onRenameDocument={handleRenameDocument}
+        onDeleteDocument={handleDeleteDocument}
+        onOpenInFinder={handleOpenInFinder}
+        onCreateFile={handleCreateDocument}
+      />
+
+      {/* Right Content Area */}
+      {!state.basePath && !isLoading ? (
+        // Empty state - no file selected yet
+        <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 text-gray-400">
+          <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p className="text-lg font-medium">Select a document</p>
+          <p className="text-sm mt-2">Choose a file from the sidebar to start editing</p>
+        </div>
       ) : (
         <EditorPage
           content={state.content}

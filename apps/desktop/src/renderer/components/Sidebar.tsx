@@ -40,6 +40,7 @@ interface SidebarProps {
   expandedFolders: Set<string>;
   loadingFolders: Set<string>;
   rootPath: string | null;
+  mode: 'file' | 'folder' | null;
   onFileSelect: (path: string) => void;
   onFolderToggle: (path: string) => void;
   onNewDocument: () => void;
@@ -174,6 +175,7 @@ export function Sidebar({
   expandedFolders: _expandedFolders,
   loadingFolders,
   rootPath: _rootPath,
+  mode,
   onFileSelect,
   onFolderToggle,
   onNewDocument,
@@ -289,6 +291,14 @@ export function Sidebar({
     }
   }, [contextMenu.node, onOpenInFinder, handleCloseContextMenu]);
 
+  // Handle open in Finder for single file mode (empty area)
+  const handleOpenInFinderForFile = useCallback(() => {
+    if (onOpenInFinder && currentPath) {
+      onOpenInFinder(currentPath);
+    }
+    handleCloseContextMenu();
+  }, [onOpenInFinder, currentPath, handleCloseContextMenu]);
+
   const handleNewDocumentInRoot = useCallback(() => {
     if (onCreateFile) {
       setInputDialog({
@@ -363,6 +373,20 @@ export function Sidebar({
   const getContextMenuItems = useCallback((): ContextMenuItem[] => {
     // Empty area context menu (root directory)
     if (!contextMenu.node) {
+      // In single file mode, only show "Open in Finder" option
+      if (mode === 'file') {
+        if (onOpenInFinder && currentPath) {
+          return [
+            {
+              label: '在 Finder 中打开',
+              icon: <ExternalLinkIcon className="w-4 h-4" />,
+              onClick: handleOpenInFinderForFile,
+            },
+          ];
+        }
+        return [];
+      }
+      
       const menuItems: ContextMenuItem[] = [
         {
           label: '新建文档',
@@ -430,7 +454,7 @@ export function Sidebar({
       return menuItems;
     }
 
-    // File context menu
+    // File context menu (single file mode - no new document option)
     return [
       {
         label: '重命名',
@@ -456,15 +480,19 @@ export function Sidebar({
     ];
   }, [
     contextMenu.node,
+    mode,
+    currentPath,
     handleNewDocumentInRoot,
     handleNewFolderInRoot,
     handleNewDocumentInFolder,
     handleNewFolderInFolder,
+    handleOpenInFinderForFile,
     handleStartRename,
     handleOpenInFinderItem,
     handleDeleteItem,
     onCreateFile,
     onCreateFolder,
+    onOpenInFinder,
   ]);
 
   // Custom row renderer with context menu
