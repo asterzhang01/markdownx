@@ -4,7 +4,6 @@
  * Multi-window support: Welcome window vs Document window
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { EditorHandle } from '@markdownx/editor-web';
 import type { Manifest } from '@markdownx/core';
 import { Sidebar } from './components/Sidebar';
 import { WelcomePage } from './components/WelcomePage';
@@ -52,8 +51,6 @@ export function App() {
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const editorRef = useRef<EditorHandle>(null);
 
   // Use ref to avoid closure issues in event listeners
   const watchedFolderRef = useRef<string | null>(null);
@@ -469,9 +466,6 @@ export function App() {
         lastSaved: null,
       });
       setIsLoading(false);
-      
-      // Update editor content
-      editorRef.current?.setContent(data.content);
     });
 
     // Document saved
@@ -490,7 +484,6 @@ export function App() {
         content,
         isDirty: false,
       }));
-      editorRef.current?.setContent(content);
     });
 
     // Folder loaded (legacy event, can be removed later)
@@ -654,7 +647,6 @@ export function App() {
         <EditorPage
           content={state.content}
           basePath={state.basePath || ''}
-          manifest={state.manifest}
           isDirty={state.isDirty}
           lastSaved={state.lastSaved}
           isLoading={isLoading}

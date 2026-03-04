@@ -2,7 +2,6 @@
   "name": "@markdownx/core",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Core logic for MarkdownX - CRDT storage, sync engine, document operations",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

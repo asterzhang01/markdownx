@@ -14,11 +14,28 @@
     "dist": "electron-builder"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.1",
+    "@codemirror/commands": "^6.10.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.2",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/lint": "^6.9.5",
+    "@codemirror/search": "^6.6.0",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.16",
+    "@lezer/common": "^1.2.3",
+    "@lezer/highlight": "^1.2.3",
     "@markdownx/core": "workspace:*",
-    "@markdownx/editor-web": "workspace:*",
     "chokidar": "^4.0.0",
+    "codemirror": "^6.0.2",
     "electron-store": "^10.0.0",
-    "react-arborist": "^3.4.3"
+    "lodash": "^4.17.23",
+    "lucide-react": "^0.576.0",
+    "react-arborist": "^3.4.3",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

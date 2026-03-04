@@ -1,14 +1,18 @@
 /**
  * Editor Page Component - Document editing view
+ * Integrates dual-mode editor (CodeMirror 6 edit + Markdown preview)
+ * with toolbar and status bar
  */
-import { useRef } from 'react';
-import { Editor, type EditorHandle } from '@markdownx/editor-web';
-import type { Manifest } from '@markdownx/core';
+import { EditorToolbar } from './EditorToolbar';
+import { MarkdownEditor } from './MarkdownEditor';
+import { MarkdownPreview } from './MarkdownPreview';
+import { StatusBar } from './StatusBar';
+import { useEditorMode } from '../hooks/useEditorMode';
+import { useDocumentStats } from '../hooks/useDocumentStats';
 
 interface EditorPageProps {
   content: string;
   basePath: string;
-  manifest: Manifest | null;
   isDirty: boolean;
   lastSaved: Date | null;
   isLoading: boolean;
@@ -19,14 +23,17 @@ interface EditorPageProps {
 export function EditorPage({
   content,
   basePath,
-  manifest,
   isDirty,
   lastSaved,
   isLoading,
   onChange,
   onSave,
 }: EditorPageProps) {
-  const editorRef = useRef<EditorHandle>(null);
+  const { mode, setMode } = useEditorMode();
+  const documentStats = useDocumentStats(content);
+
+  const documentName =
+    basePath.split('/').pop()?.replace('.mdx', '') || 'Untitled';
 
   if (isLoading) {
     return (
@@ -39,59 +46,33 @@ export function EditorPage({
     );
   }
 
-  const documentName = basePath.split('/').pop() || 'Untitled';
-
   return (
     <div className="flex-1 h-full flex flex-col bg-white">
-      {/* Document header */}
-      <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50">
-        <div className="flex items-center gap-3">
-          <h2 className="font-medium text-gray-900 truncate max-w-md">
-            {documentName}
-          </h2>
-          {isDirty && (
-            <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full">
-              Unsaved
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 text-sm text-gray-500">
-          {manifest && (
-            <span className="text-xs">
-              Format v{manifest.formatVersion}
-            </span>
-          )}
-          {lastSaved && (
-            <span className="text-xs">
-              Saved {lastSaved.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </div>
+      {/* Toolbar */}
+      <EditorToolbar
+        documentName={documentName}
+        mode={mode}
+        onModeChange={setMode}
+        isDirty={isDirty}
+        lastSaved={lastSaved}
+      />
 
-      {/* Editor */}
+      {/* Editor / Preview */}
       <div className="flex-1 overflow-hidden">
-        <Editor
-          ref={editorRef}
-          initialContent={content}
-          onChange={onChange}
-          onSave={onSave}
-          basePath={basePath}
-          className="h-full"
-        />
+        {mode === 'edit' ? (
+          <MarkdownEditor
+            content={content}
+            basePath={basePath}
+            onChange={onChange}
+            onSave={onSave}
+          />
+        ) : (
+          <MarkdownPreview content={content} basePath={basePath} />
+        )}
       </div>
 
       {/* Status bar */}
-      <div className="h-8 border-t border-gray-200 flex items-center justify-between px-4 bg-gray-50 text-xs text-gray-500">
-        <div className="flex items-center gap-4">
-          <span>{content.split('\n').length} lines</span>
-          <span>{content.length} characters</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span>Markdown</span>
-          {isDirty && <span className="text-orange-600">● Unsaved changes</span>}
-        </div>
-      </div>
+      <StatusBar mode={mode} stats={documentStats} isDirty={isDirty} />
     </div>
   );
 }

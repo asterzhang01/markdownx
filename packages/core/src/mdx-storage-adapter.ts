@@ -232,8 +232,8 @@ export class MdxStorageAdapter {
           doc = Automerge.init<MarkdownDoc>();
         }
         for (const change of changesToApply) {
-          const [newDoc] = Automerge.applyChanges(doc, [change]);
-          doc = newDoc;
+          const [applied]: [Automerge.Doc<MarkdownDoc>] = Automerge.applyChanges(doc!, [change]);
+          doc = applied;
         }
       }
 
@@ -274,8 +274,8 @@ export class MdxStorageAdapter {
           doc = Automerge.init<MarkdownDoc>();
         }
         for (const change of changesToApply) {
-          const [newDoc] = Automerge.applyChanges(doc, [change]);
-          doc = newDoc;
+          const [applied]: [Automerge.Doc<MarkdownDoc>] = Automerge.applyChanges(doc!, [change]);
+          doc = applied;
         }
       }
     }
