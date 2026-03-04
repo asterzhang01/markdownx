@@ -6,6 +6,13 @@
  *   2. Sync       — FileSyncEngine (serverless multi-device CRDT sync)
  *   3. Operations — DocumentOperations (document mutation abstraction)
  *   4. AI         — AIServiceRegistry (interface-only, no implementation)
+ *
+ * Phase 2 deliverables:
+ *   5. NodeFileSystemAdapter — Node.js file system adapter for Electron
+ *   6. SyncEngine            — High-level orchestrator for .mdx document lifecycle
+ *   7. Document utilities    — isMarkdownXDocument, createMarkdownXDocument
+ *   8. Image processing      — processImage (content-addressed asset storage)
+ *   9. Bridge types          — BridgeMessage, Manifest for native-web communication
  */
 
 // Schema types
@@ -41,6 +48,9 @@ export type {
 export { MemoryFileSystemAdapter } from "./fs-adapter.js";
 export type { FileSystemAdapter } from "./fs-adapter.js";
 
+// Node.js file system adapter (Phase 2)
+export { NodeFileSystemAdapter, createNodeFsAdapter } from "./node-fs-adapter.js";
+
 // Storage adapter
 export {
   MdxStorageAdapter,
@@ -68,8 +78,22 @@ export {
   resolveCommentThreadPositions,
 } from "./document-operations.js";
 
-// Sync engine
+// Low-level sync engine (Phase 1)
 export { FileSyncEngine } from "./file-sync-engine.js";
+
+// High-level sync engine (Phase 2)
+export { SyncEngine, createSyncEngine } from "./sync-engine.js";
+export type { SyncEngineOptions } from "./sync-engine.js";
+
+// Document utilities (Phase 2)
+export { isMarkdownXDocument, createMarkdownXDocument } from "./mdx-document.js";
+
+// Image processing (Phase 2)
+export { processImage } from "./image-processing.js";
+export type { AssetInfo } from "./image-processing.js";
+
+// Bridge types (Phase 2)
+export type { BridgeMessage, Manifest } from "./bridge-types.js";
 
 // AI interfaces (types only)
 export type {

@@ -59,7 +59,13 @@ export class MemoryFileSystemAdapter implements FileSystemAdapter {
   }
 
   async exists(path: string): Promise<boolean> {
-    return this.files.has(path);
+    if (this.files.has(path)) return true;
+    // Check if path is a "directory" (any stored key starts with path/)
+    const prefix = path.endsWith("/") ? path : `${path}/`;
+    for (const key of this.files.keys()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
   }
 
   async mkdir(_path: string): Promise<void> {
