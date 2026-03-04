@@ -21,7 +21,7 @@ The `.mdx` format treats each note as an atomic knowledge unit — a self-contai
 
 - **`index.md`** — The golden copy in standard Markdown, readable by any editor
 - **`assets/`** — Resources stored by SHA-256 hash for deduplication and integrity
-- **`.mdx/state.bin`** — Automerge binary state for full operation history
+- **`.mdx/`** — Automerge binary state for full operation history
 
 > **Vendor Independence**: Your data is yours forever. No cloud lock-in, no proprietary formats.
 
@@ -32,7 +32,7 @@ Powered by [Automerge](https://automerge.org/), MarkdownX enables:
 - **Serverless Collaboration** — Sync directly between devices without a central server
 - **Offline-First** — Full functionality without internet connection
 - **Automatic Conflict Resolution** — CRDTs guarantee convergence, no manual merging needed
-- **Any Transport Channel** — Sync via WebRTC, Bluetooth, file sharing, or any method you choose
+- **Any Transport Channel** — Sync via iCloud、WiFi, file sharing, or any method you choose
 
 #### 3. 🤖 AI-Native Architecture
 

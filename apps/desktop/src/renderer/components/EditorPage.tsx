@@ -3,6 +3,7 @@
  * Integrates dual-mode editor (CodeMirror 6 edit + Markdown preview)
  * with toolbar and status bar
  */
+import { useEffect } from 'react';
 import { EditorToolbar } from './EditorToolbar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { MarkdownPreview } from './MarkdownPreview';
@@ -34,6 +35,10 @@ export function EditorPage({
 
   const documentName =
     basePath.split('/').pop()?.replace('.mdx', '') || 'Untitled';
+
+  useEffect(() => {
+    console.log('[EditorPage] Page rendered', { documentName, mode, isLoading, isDirty });
+  }, [documentName, mode, isLoading, isDirty]);
 
   if (isLoading) {
     return (

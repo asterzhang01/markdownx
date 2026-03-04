@@ -2,6 +2,7 @@
  * Editor Toolbar Component
  * Provides mode switching (edit/preview), document name display, and save status
  */
+import { useEffect } from 'react';
 import type { EditorMode } from '../hooks/useEditorMode';
 import { Pencil, Eye } from 'lucide-react';
 
@@ -20,6 +21,10 @@ export function EditorToolbar({
   isDirty,
   lastSaved,
 }: EditorToolbarProps) {
+  useEffect(() => {
+    console.log('[EditorToolbar] Toolbar rendered', { documentName, mode, isDirty });
+  }, [documentName, mode, isDirty]);
+
   return (
     <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50 select-none">
       {/* Left: document name + save status */}

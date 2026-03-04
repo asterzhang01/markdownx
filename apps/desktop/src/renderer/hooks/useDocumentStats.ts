@@ -15,7 +15,7 @@ const WORDS_PER_MINUTE = 200;
 
 export function useDocumentStats(content: string | undefined): DocumentStats {
   return useMemo(() => {
-    if (!content) {
+    if (!content || typeof content !== 'string') {
       return {
         lineCount: 0,
         wordCount: 0,

@@ -46,6 +46,8 @@ interface WindowState {
 const windowMap = new Map<number, WindowState>();
 let nextWindowId = 1;
 const fsAdapter = createNodeFsAdapter();
+// App data directory for storing device ID (shared across all documents)
+const appDataPath = join(app.getPath('userData'), 'markdownx');
 
 // Get window state by window id
 function getWindowState(windowId: number): WindowState | undefined {
@@ -382,7 +384,7 @@ async function scanFolderForMdx(folderPath: string): Promise<FileItem[]> {
         const fullPath = join(currentPath, entry.name);
         
         if (entry.isDirectory()) {
-          // Check if it's an mdx document folder (contains index.md and .mdx/state.bin)
+          // Check if it's an mdx document folder (contains index.md and .mdx directory)
           const isMdxDoc = await isMarkdownXDocument(fullPath, fsAdapter);
           if (isMdxDoc) {
             result.push({
@@ -683,7 +685,20 @@ async function loadDocumentInWindow(windowState: WindowState, path: string, isNe
 
   // Create or load document
   if (isNew) {
-    windowState.currentEngine = await createMarkdownXDocument(path, fsAdapter);
+    // Create the document structure first
+    await createMarkdownXDocument(path, fsAdapter);
+    
+    // Then initialize SyncEngine to load the newly created document
+    windowState.currentEngine = createSyncEngine({
+      basePath: path,
+      fsAdapter,
+      appDataPath,
+      onExternalChange: (content) => {
+        windowState.window.webContents.send('document:external-change', content);
+      },
+    });
+
+    await windowState.currentEngine.load();
   } else {
     const isValid = await isMarkdownXDocument(path, fsAdapter);
     if (!isValid) {
@@ -694,6 +709,7 @@ async function loadDocumentInWindow(windowState: WindowState, path: string, isNe
     windowState.currentEngine = createSyncEngine({
       basePath: path,
       fsAdapter,
+      appDataPath,
       onExternalChange: (content) => {
         windowState.window.webContents.send('document:external-change', content);
       },

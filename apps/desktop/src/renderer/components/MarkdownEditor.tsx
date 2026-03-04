@@ -57,6 +57,15 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const contentRef = useRef(content);
+  // Track whether the content change originated from the editor itself
+  const isInternalChangeRef = useRef(false);
+
+  useEffect(() => {
+    console.log('[MarkdownEditor] Component mounted', { basePath, contentLength: content.length });
+    return () => {
+      console.log('[MarkdownEditor] Component unmounting');
+    };
+  }, []);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -71,7 +80,13 @@ export function MarkdownEditor({
   }, [content]);
 
   // Sync external content changes into the editor (e.g., from file watcher)
+  // Skip updates that originated from the editor's own onChange to avoid loops
   useEffect(() => {
+    if (isInternalChangeRef.current) {
+      isInternalChangeRef.current = false;
+      return;
+    }
+
     const view = editorViewRef.current;
     if (!view) return;
 
@@ -89,12 +104,17 @@ export function MarkdownEditor({
 
   // Initialize CodeMirror editor
   useEffect(() => {
-    if (!containerRef.current) return;
+    console.log('[MarkdownEditor] Initializing CodeMirror editor', { basePath });
+    if (!containerRef.current) {
+      console.error('[MarkdownEditor] Container ref not available');
+      return;
+    }
 
     const saveKeymap = keymap.of([
       {
         key: 'Mod-s',
         run: (view) => {
+          console.log('[MarkdownEditor] Save triggered via shortcut');
           onSaveRef.current(view.state.doc.toString());
           return true;
         },
@@ -131,6 +151,8 @@ export function MarkdownEditor({
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const newContent = update.state.doc.toString();
+            console.log('[MarkdownEditor] Content changed', { newLength: newContent.length });
+            isInternalChangeRef.current = true;
             onChangeRef.current(newContent);
           }
         }),
@@ -151,8 +173,10 @@ export function MarkdownEditor({
 
     editorViewRef.current = view;
     view.focus();
+    console.log('[MarkdownEditor] CodeMirror editor initialized successfully');
 
     return () => {
+      console.log('[MarkdownEditor] Destroying CodeMirror editor');
       view.destroy();
       editorViewRef.current = null;
     };

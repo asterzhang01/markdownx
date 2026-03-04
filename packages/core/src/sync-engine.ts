@@ -24,17 +24,17 @@ import { extractTitle } from "./document-operations.js";
 // Device ID management
 // ---------------------------------------------------------------------------
 
-const DEVICE_ID_FILE = ".mdx/device-id";
+const DEVICE_ID_FILE = "device-id";
 
 /**
- * Get or create a stable device ID persisted in the .mdx directory.
+ * Get or create a stable device ID persisted in the App data directory.
  * The ID is a random hex string, generated once per device and reused.
  */
 async function getOrCreateDeviceId(
-  basePath: string,
+  appDataPath: string,
   fsAdapter: FileSystemAdapter
 ): Promise<string> {
-  const deviceIdPath = `${basePath}/${DEVICE_ID_FILE}`;
+  const deviceIdPath = `${appDataPath}/${DEVICE_ID_FILE}`;
   try {
     const existing = await fsAdapter.readTextFile(deviceIdPath);
     const trimmed = existing.trim();
@@ -50,7 +50,7 @@ async function getOrCreateDeviceId(
     .join("")
     .toUpperCase();
 
-  await fsAdapter.mkdir(`${basePath}/.mdx`);
+  await fsAdapter.mkdir(appDataPath);
   await fsAdapter.writeTextFile(deviceIdPath, deviceId);
   return deviceId;
 }
@@ -65,12 +65,15 @@ export interface SyncEngineOptions {
   basePath: string;
   /** File system adapter (NodeFileSystemAdapter for Electron) */
   fsAdapter: FileSystemAdapter;
+  /** App data directory for storing device ID (optional, defaults to basePath/.mdx for backward compatibility) */
+  appDataPath?: string;
   /** Called when external changes are detected (e.g. from another device via cloud sync) */
   onExternalChange?: (content: string) => void;
 }
 
 export class SyncEngine {
   private readonly basePath: string;
+  private readonly appDataPath: string;
   private readonly fsAdapter: FileSystemAdapter;
   private readonly onExternalChange?: (content: string) => void;
 
@@ -87,6 +90,7 @@ export class SyncEngine {
   constructor(options: SyncEngineOptions) {
     this.basePath = options.basePath;
     this.fsAdapter = options.fsAdapter;
+    this.appDataPath = options.appDataPath || `${this.basePath}/.mdx`;
     this.onExternalChange = options.onExternalChange;
   }
 
@@ -99,7 +103,7 @@ export class SyncEngine {
    * Reads snapshot + chunk, performs CRDT merge with all devices.
    */
   async load(): Promise<void> {
-    this.deviceId = await getOrCreateDeviceId(this.basePath, this.fsAdapter);
+    this.deviceId = await getOrCreateDeviceId(this.appDataPath, this.fsAdapter);
     this.storage = new MdxStorageAdapter(this.basePath, this.fsAdapter, this.deviceId);
     this.syncEngine = new FileSyncEngine(this.basePath, this.fsAdapter, this.deviceId);
 
@@ -145,7 +149,7 @@ export class SyncEngine {
    * Called by createMarkdownXDocument flow.
    */
   async init(initialContent = "# Untitled\n\n"): Promise<void> {
-    this.deviceId = await getOrCreateDeviceId(this.basePath, this.fsAdapter);
+    this.deviceId = await getOrCreateDeviceId(this.appDataPath, this.fsAdapter);
     this.storage = new MdxStorageAdapter(this.basePath, this.fsAdapter, this.deviceId);
     this.syncEngine = new FileSyncEngine(this.basePath, this.fsAdapter, this.deviceId);
 

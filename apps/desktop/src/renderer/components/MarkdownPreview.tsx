@@ -17,7 +17,10 @@ interface MarkdownPreviewProps {
  * Resolve image path: convert assets/ relative paths to file:// absolute paths
  */
 function resolveImagePath(src: string | undefined, basePath: string): string {
-  if (!src) return '';
+  if (!src) {
+    console.warn('[MarkdownPreview] Empty image src');
+    return '';
+  }
   if (
     src.startsWith('http://') ||
     src.startsWith('https://') ||
@@ -26,10 +29,14 @@ function resolveImagePath(src: string | undefined, basePath: string): string {
     return src;
   }
   const normalizedSrc = src.startsWith('./') ? src.slice(2) : src;
-  return `file://${basePath}/${normalizedSrc}`;
+  const resolvedPath = `file://${basePath}/${normalizedSrc}`;
+  console.log('[MarkdownPreview] Resolved image path', { src, resolvedPath });
+  return resolvedPath;
 }
 
 export function MarkdownPreview({ content, basePath }: MarkdownPreviewProps) {
+  console.log('[MarkdownPreview] Rendering preview', { basePath, contentLength: content.length });
+  
   return (
     <div className="h-full overflow-auto bg-white">
       <article className="markdown-preview max-w-[722px] mx-auto px-8 py-6">
