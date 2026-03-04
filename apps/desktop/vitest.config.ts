@@ -1,0 +1,19 @@
+import { defineConfig } from 'vitest/config';
+import { resolve } from 'path';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts', 'src/**/*.tsx'],
+    },
+  },
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src/renderer'),
+    },
+  },
+});

@@ -31,6 +31,10 @@ import { tableOfContentsPreviewPlugin } from '../codemirrorPlugins/tableOfConten
 import { previewImagesPlugin } from '../codemirrorPlugins/previewMarkdownImages';
 import { dragAndDropFilesPlugin } from '../codemirrorPlugins/dragAndDropFiles';
 import { dropCursor } from '../codemirrorPlugins/dropCursor';
+import {
+  heading, bold, italic, strikethrough, inlineCode,
+  codeBlock, link, quote, unorderedList, orderedList,
+} from '../codemirrorPlugins/markdownCommands';
 
 interface MarkdownEditorProps {
   /** Initial document content */
@@ -41,6 +45,8 @@ interface MarkdownEditorProps {
   onChange: (content: string) => void;
   /** Called when user triggers save (⌘S) */
   onSave: (content: string) => void;
+  /** Exposed ref to the CodeMirror EditorView (for toolbar commands) */
+  editorViewRef?: React.MutableRefObject<EditorView | null>;
 }
 
 export function MarkdownEditor({
@@ -48,9 +54,11 @@ export function MarkdownEditor({
   basePath,
   onChange,
   onSave,
+  editorViewRef: externalEditorViewRef,
 }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const editorViewRef = useRef<EditorView | null>(null);
+  const internalEditorViewRef = useRef<EditorView | null>(null);
+  const editorViewRef = externalEditorViewRef || internalEditorViewRef;
   const [editorCrashed] = useState(false);
 
   // Use refs to avoid stale closures in CM dispatch
@@ -121,11 +129,32 @@ export function MarkdownEditor({
       },
     ]);
 
+    // Markdown formatting shortcuts
+    const formattingKeymap = keymap.of([
+      { key: 'Mod-b', run: bold() },
+      { key: 'Mod-i', run: italic() },
+      { key: 'Mod-Shift-x', run: strikethrough() },
+      { key: 'Mod-`', run: inlineCode() },
+      { key: 'Mod-Shift-c', run: codeBlock() },
+      { key: 'Mod-k', run: link() },
+      { key: 'Mod-Shift-q', run: quote() },
+      { key: 'Mod-Shift-u', run: unorderedList() },
+      { key: 'Mod-Shift-o', run: orderedList() },
+      { key: 'Mod-1', run: heading(1) },
+      { key: 'Mod-2', run: heading(2) },
+      { key: 'Mod-3', run: heading(3) },
+      { key: 'Mod-4', run: heading(4) },
+      { key: 'Mod-5', run: heading(5) },
+      { key: 'Mod-6', run: heading(6) },
+    ]);
+
     const view = new EditorView({
       doc: content,
       extensions: [
         // Save shortcut (must be before other keymaps to take priority)
         saveKeymap,
+        // Markdown formatting shortcuts
+        formattingKeymap,
 
         // Basic editing capabilities
         history(),

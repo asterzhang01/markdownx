@@ -1,10 +1,11 @@
 /**
  * Editor Toolbar Component
- * Provides mode switching (edit/preview), document name display, and save status
+ * Provides mode switching (edit/preview), document name display,
+ * save status, and formatting toolbar toggle
  */
 import { useEffect } from 'react';
 import type { EditorMode } from '../hooks/useEditorMode';
-import { Pencil, Eye } from 'lucide-react';
+import { Pencil, Eye, PanelTop } from 'lucide-react';
 
 interface EditorToolbarProps {
   documentName: string;
@@ -12,6 +13,8 @@ interface EditorToolbarProps {
   onModeChange: (mode: EditorMode) => void;
   isDirty: boolean;
   lastSaved: Date | null;
+  showFormattingToolbar?: boolean;
+  onToggleFormattingToolbar?: () => void;
 }
 
 export function EditorToolbar({
@@ -20,6 +23,8 @@ export function EditorToolbar({
   onModeChange,
   isDirty,
   lastSaved,
+  showFormattingToolbar,
+  onToggleFormattingToolbar,
 }: EditorToolbarProps) {
   useEffect(() => {
     console.log('[EditorToolbar] Toolbar rendered', { documentName, mode, isDirty });
@@ -39,8 +44,25 @@ export function EditorToolbar({
         )}
       </div>
 
-      {/* Right: mode toggle + save time */}
+      {/* Right: formatting toggle + mode toggle + save time */}
       <div className="flex items-center gap-3">
+        {/* Formatting toolbar toggle — only in edit mode */}
+        {mode === 'edit' && onToggleFormattingToolbar && (
+          <button
+            className={`p-1.5 rounded transition-colors ${
+              showFormattingToolbar
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+            }`}
+            onClick={onToggleFormattingToolbar}
+            title={showFormattingToolbar ? '隐藏格式化工具栏' : '显示格式化工具栏'}
+            aria-label="切换格式化工具栏"
+            aria-pressed={showFormattingToolbar}
+          >
+            <PanelTop size={16} />
+          </button>
+        )}
+
         {/* Mode toggle button group */}
         <div className="flex items-center bg-gray-200 rounded-md p-0.5">
           <button

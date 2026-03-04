@@ -1,10 +1,12 @@
 /**
  * Editor Page Component - Document editing view
  * Integrates dual-mode editor (CodeMirror 6 edit + Markdown preview)
- * with toolbar and status bar
+ * with formatting toolbar, top toolbar and status bar
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { EditorView } from '@codemirror/view';
 import { EditorToolbar } from './EditorToolbar';
+import { FormattingToolbar } from './FormattingToolbar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { StatusBar } from './StatusBar';
@@ -32,6 +34,8 @@ export function EditorPage({
 }: EditorPageProps) {
   const { mode, setMode } = useEditorMode();
   const documentStats = useDocumentStats(content);
+  const editorViewRef = useRef<EditorView | null>(null);
+  const [showFormattingToolbar, setShowFormattingToolbar] = useState(true);
 
   const documentName =
     basePath.split('/').pop()?.replace('.mdx', '') || 'Untitled';
@@ -53,14 +57,21 @@ export function EditorPage({
 
   return (
     <div className="flex-1 h-full flex flex-col bg-white">
-      {/* Toolbar */}
+      {/* Top toolbar */}
       <EditorToolbar
         documentName={documentName}
         mode={mode}
         onModeChange={setMode}
         isDirty={isDirty}
         lastSaved={lastSaved}
+        showFormattingToolbar={showFormattingToolbar}
+        onToggleFormattingToolbar={() => setShowFormattingToolbar((prev) => !prev)}
       />
+
+      {/* Formatting toolbar — only visible in edit mode */}
+      {mode === 'edit' && showFormattingToolbar && (
+        <FormattingToolbar editorViewRef={editorViewRef} />
+      )}
 
       {/* Editor / Preview */}
       <div className="flex-1 overflow-hidden">
@@ -70,6 +81,7 @@ export function EditorPage({
             basePath={basePath}
             onChange={onChange}
             onSave={onSave}
+            editorViewRef={editorViewRef}
           />
         ) : (
           <MarkdownPreview content={content} basePath={basePath} />
