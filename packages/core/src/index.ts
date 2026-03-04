@@ -1,81 +1,82 @@
 /**
  * @markdownx/core
- * Core logic for MarkdownX - CRDT, Dual-Write, Asset Management
+ *
+ * Phase 1 deliverables:
+ *   1. Storage    — MdxStorageAdapter (automerge-repo → .mdx file structure)
+ *   2. Sync       — FileSyncEngine (serverless multi-device CRDT sync)
+ *   3. Operations — DocumentOperations (document mutation abstraction)
+ *   4. AI         — AIServiceRegistry (interface-only, no implementation)
  */
 
-// Types
+// Schema types
 export type {
-  Manifest,
-  DocState,
-  ManifestValidationResult,
-  FileSystemAdapter,
-  InitDocOptions,
-  LoadDocResult,
-  AssetInfo,
-  BridgeMessage,
-  SyncEngineConfig,
-} from './types';
+  Comment,
+  CommentThread,
+  CommentThreadForUI,
+  AIMetadata,
+  MarkdownDoc,
+  FileEntry,
+  AssetsDoc,
+  DocLink,
+  FolderDoc,
+  ChunkFileMetadata,
+  SnapshotFileMetadata,
+} from "./schema.js";
 
-// Automerge operations
-export {
-  initDoc,
-  loadDoc,
-  saveDoc,
-  mergeDocs,
-  updateContent,
-  getContent,
-  getMetadata,
-  generateSyncMessage,
-  receiveSyncMessage,
-  initSyncState,
-  cloneDoc,
-  getActorId,
-  forkDoc,
-  equals,
-} from './automerge';
-export type { Doc } from './automerge';
+// Operation types
+export type {
+  TextSpliceOperation,
+  AssetUploadOperation,
+  AssetDeleteOperation,
+  AddCommentThreadOperation,
+  ReplyToCommentOperation,
+  ResolveCommentOperation,
+  FolderRenameOperation,
+  FolderAddDocOperation,
+  FolderRemoveDocOperation,
+  DocumentOperation,
+} from "./operations.js";
 
-// Manifest management
-export {
-  CURRENT_FORMAT_VERSION,
-  CURRENT_MIN_READER_VERSION,
-  APP_VERSION,
-  createDefaultManifest,
-  validateManifest,
-  hasFeature,
-  addFeature,
-  upgradeManifest,
-  serializeManifest,
-  parseManifest,
-  getValidationMessage,
-} from './manifest';
+// FileSystem adapter
+export { MemoryFileSystemAdapter } from "./fs-adapter.js";
+export type { FileSystemAdapter } from "./fs-adapter.js";
 
-// Asset management
+// Storage adapter
 export {
-  calculateHash,
-  getFileExtension,
-  getMimeType,
-  processImage,
-  processImageFromFile,
-  processImageFromBase64,
-  resolveAssetPath,
-  listAssets,
+  MdxStorageAdapter,
+  chunkFileName,
+  snapshotFileName,
+  parseChunkFileName,
+  parseSnapshotFileName,
+} from "./mdx-storage-adapter.js";
+
+// Document operations
+export {
+  splice,
+  uploadAsset,
   deleteAsset,
-  cleanupUnusedAssets,
-  assetToDataURL,
-} from './asset-manager';
+  addCommentThread,
+  replyToCommentThread,
+  resolveCommentThread,
+  folderRename,
+  folderAddDoc,
+  folderRemoveDoc,
+  initDocument,
+  initAssetsDoc,
+  initFolderDoc,
+  extractTitle,
+  resolveCommentThreadPositions,
+} from "./document-operations.js";
 
-// Sync Engine
-export {
-  SyncEngine,
-  createSyncEngine,
-  isMarkdownXDocument,
-  createMarkdownXDocument,
-} from './sync-engine';
+// Sync engine
+export { FileSyncEngine } from "./file-sync-engine.js";
 
-// FileSystem Adapters
-export {
-  createNodeFsAdapter,
-  createMemoryFsAdapter,
-  createIpcFsAdapter,
-} from './fs-adapter';
+// AI interfaces (types only)
+export type {
+  AICompletionProvider,
+  SemanticSearchResult,
+  AISemanticSearchProvider,
+  DocumentAnalysisResult,
+  AIDocumentAnalysisProvider,
+  AIServiceRegistry,
+} from "./ai-interfaces.js";
